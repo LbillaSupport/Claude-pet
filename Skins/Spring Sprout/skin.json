@@ -1,0 +1,15 @@
+{
+  "name": "Spring Sprout",
+  "author": "Claude Buddy",
+  "version": "1.0.0",
+  "description": "A fresh, leafy green companion for sunny afternoons.",
+  "colors": {
+    "body": "#8FCB6B",
+    "bodyShadow": "#6FA84F",
+    "belly": "#F4F7E9",
+    "pupil": "#2B2420",
+    "mouth": "#4B6B2E",
+    "blush": "#F2A0A0",
+    "accent": "#FFD166"
+  }
+}

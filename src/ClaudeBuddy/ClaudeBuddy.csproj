@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Native Windows desktop app, no Forms/WPF/WinUI dependency: we host a raw
+         Win32 layered window and render every pixel with SkiaSharp ourselves. -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>AnyCPU;x64</Platforms>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+
+    <RootNamespace>ClaudeBuddy</RootNamespace>
+    <AssemblyName>ClaudeBuddy</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- A desktop pet should never flash a console window. -->
+    <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+
+    <Product>Claude Buddy</Product>
+    <Company>Claude Buddy</Company>
+    <Description>An adorable desktop companion that lives on your Windows desktop.</Description>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Copyright>Copyright © Claude Buddy contributors</Copyright>
+
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The only rendering dependency. SkiaSharp ships the native libSkiaSharp
+         for win-x64 transitively, so software raster works out of the box. -->
+    <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Default configuration shipped next to the executable. User settings are
+         written to %AppData%\ClaudeBuddy\settings.json on first run. -->
+    <None Update="appsettings.default.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the sample skins so the Skins folder exists on first launch. -->
+    <None Include="..\..\Skins\**\*.*" Link="Skins\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+
+    <!-- Ship the sample behaviour-pack mod. -->
+    <None Include="..\..\Mods\**\*.*" Link="Mods\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

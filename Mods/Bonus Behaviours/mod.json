@@ -1,0 +1,44 @@
+{
+  "name": "Bonus Behaviours",
+  "author": "Claude Buddy",
+  "version": "1.0.0",
+  "description": "A small behaviour pack showing how mods extend the mascot with pure JSON.",
+  "enabled": true,
+  "behaviors": [
+    {
+      "id": "happy-hop",
+      "displayName": "Happy Hop",
+      "animation": "Jump",
+      "category": "Playful",
+      "mood": "Excited",
+      "weight": 1.0,
+      "minDuration": 0.9,
+      "maxDuration": 1.2,
+      "cooldown": 12,
+      "sound": "jump"
+    },
+    {
+      "id": "ponder",
+      "displayName": "Deep Ponder",
+      "animation": "Think",
+      "category": "Idle",
+      "mood": "Curious",
+      "weight": 1.2,
+      "minDuration": 4,
+      "maxDuration": 8,
+      "cooldown": 15
+    },
+    {
+      "id": "victory-spin",
+      "displayName": "Victory Spin",
+      "animation": "Spin",
+      "category": "Playful",
+      "mood": "Proud",
+      "weight": 0.6,
+      "minDuration": 1.4,
+      "maxDuration": 2.0,
+      "cooldown": 20,
+      "particle": "Star"
+    }
+  ]
+}

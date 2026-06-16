@@ -1,0 +1,15 @@
+{
+  "name": "Midnight Neon",
+  "author": "Claude Buddy",
+  "version": "1.0.0",
+  "description": "A glowing after-hours look in deep purples and electric cyan.",
+  "colors": {
+    "body": "#3B2F63",
+    "bodyShadow": "#2A2147",
+    "belly": "#C9B8FF",
+    "pupil": "#FFFFFF",
+    "mouth": "#5CF2E6",
+    "blush": "#FF6BD0",
+    "accent": "#5CF2E6"
+  }
+}
