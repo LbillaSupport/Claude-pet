@@ -57,6 +57,7 @@ if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
 
 # --- 2. Package with Velopack ---------------------------------------------
 Write-Host "==> Packaging Setup.exe + update packages with Velopack" -ForegroundColor Cyan
+$icon = Join-Path $root "src\ClaudeBuddy\appicon.ico"
 & $vpk pack `
     --packId "ClaudeBuddy" `
     --packTitle "Claude Buddy" `
@@ -64,6 +65,7 @@ Write-Host "==> Packaging Setup.exe + update packages with Velopack" -Foreground
     --packVersion $Version `
     --packDir $publishDir `
     --mainExe "ClaudeBuddy.exe" `
+    --icon $icon `
     --outputDir $releasesDir
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed." }
 
