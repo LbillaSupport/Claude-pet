@@ -7,16 +7,18 @@ namespace ClaudeBuddy.Services;
 /// <summary>
 /// Keeps Claude Buddy up to date from GitHub Releases using Velopack (the modern
 /// successor to Squirrel). The app is installed by a generated <c>Setup.exe</c>; this
-/// service then checks the same GitHub repo for newer releases and applies them.
+/// service then polls the same GitHub repo for newer releases and applies them.
 ///
-/// On startup (in the background) it asks the configured GitHub repo for the latest
-/// Velopack release. If one is newer than the running build it downloads it and then
-/// <b>applies it and restarts straight away</b> — a brief, one-time relaunch into the new
-/// version. We don't wait for a clean exit because users routinely just kill the process
-/// or shut down the PC, which would otherwise strand the staged update forever.
+/// It checks shortly after launch and then <b>keeps re-checking on a timer</b> for the
+/// whole session (default every 4 hours), so a long-running buddy picks up new versions
+/// without the user ever having to relaunch it. When a newer release is found it downloads
+/// it and <b>applies it and relaunches straight away</b> — we don't wait for a clean exit
+/// because users routinely just kill the process or shut down the PC, which would otherwise
+/// strand the staged update.
 ///
-/// Everything is best-effort: no network, a non-Velopack build (e.g. a plain dev run from
-/// Visual Studio / the bin folder), or any error simply means "no update this run".
+/// Everything is best-effort: no internet, a non-Velopack build (e.g. a plain dev run from
+/// the bin folder), or any error simply means "no update this round"; the timer keeps
+/// ticking and will try again later (so transient connectivity is handled for free).
 ///
 /// IMPORTANT: <c>VelopackApp.Build().Run()</c> must be called once at the very top of
 /// Main (see Program.cs) for install/update hooks to work.
@@ -26,13 +28,19 @@ public sealed class UpdateService
     // The GitHub repo that publishes releases.
     private const string RepoUrl = "https://github.com/LbillaSupport/Claude-pet";
 
+    // Wait a little after launch before the first check (don't compete with startup),
+    // then re-check on this cadence for as long as the app is running.
+    private static readonly TimeSpan FirstCheckDelay = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(4);
+
     private readonly ISettingsService _settings;
+    private readonly CancellationTokenSource _cts = new();
 
     public UpdateService(ISettingsService settings) => _settings = settings;
 
     /// <summary>
-    /// Kicks off a background check. Returns immediately. If a newer release exists it is
-    /// downloaded and applied, then the app relaunches itself into the new version.
+    /// Starts the background update poller: an initial check shortly after launch, then a
+    /// repeating check every few hours for the rest of the session. Returns immediately.
     /// </summary>
     public void StartBackgroundCheck()
     {
@@ -41,17 +49,51 @@ public sealed class UpdateService
             return;
         }
 
-        _ = Task.Run(async () =>
+        _ = Task.Run(() => PollLoopAsync(_cts.Token));
+    }
+
+    /// <summary>Stops the poller (called from shutdown).</summary>
+    public void Stop()
+    {
+        try
         {
-            try
+            _cts.Cancel();
+        }
+        catch
+        {
+            // Nothing useful to do if cancellation throws on a disposed source.
+        }
+    }
+
+    private async Task PollLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(FirstCheckDelay, token).ConfigureAwait(false);
+
+            // Re-read the setting each round so toggling auto-update off takes effect, and
+            // a single timer drives every subsequent check.
+            using var timer = new PeriodicTimer(CheckInterval);
+            do
             {
-                await CheckAndApplyAsync().ConfigureAwait(false);
+                if (_settings.Current.AutoUpdate)
+                {
+                    try
+                    {
+                        await CheckAndApplyAsync().ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best-effort: swallow and let the timer try again next interval.
+                    }
+                }
             }
-            catch
-            {
-                // Updates are a nicety — a failed check must never disrupt the app.
-            }
-        });
+            while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException)
+        {
+            // App is shutting down — expected.
+        }
     }
 
     private async Task CheckAndApplyAsync()

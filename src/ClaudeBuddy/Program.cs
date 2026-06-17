@@ -72,6 +72,7 @@ internal static class Program
             }
             finally
             {
+                updater.Stop();
                 engine.Shutdown();
             }
 
