@@ -44,20 +44,29 @@ src\ClaudeBuddy\bin\Release\net9.0-windows\win-x64\ClaudeBuddy.exe
   launch silently exits.
 - Stable footprint: ~40 MB RAM, no crash log on a clean run.
 
-### Distribution & auto-update (Velopack)
+### Distribution & auto-update (Velopack) — verified end-to-end
 Shipping to non-technical users is done with **Velopack** (modern Squirrel successor) —
 NOT a `.bat`/MSI. `VelopackApp.Build().Run()` is the **first line of `Main`** (intercepts
 install/update/uninstall hooks; no-op on a dev run). `Services/UpdateService.cs` checks
-**GitHub Releases** in the background on startup (`GithubSource(RepoUrl)`), downloads any
-newer release, and `ApplyUpdatesAndRestart` swaps it in **on exit** (in `engine.Shutdown`
-path). Gated by `AppSettings.AutoUpdate` (default true). `manager.IsInstalled` is false on
-a plain dev run, so updates only ever happen for an installed copy.
-- **Set the repo**: `UpdateService.RepoUrl` constant (`https://github.com/<owner>/<repo>`).
+**GitHub Releases** in the background on startup (`GithubSource(RepoUrl)`), and if a newer
+release exists it downloads it and calls **`ApplyUpdatesAndRestart` immediately** — it does
+NOT wait for a clean exit, because a force-kill / PC shutdown would otherwise strand the
+staged update. The app silently relaunches into the new version (no dialog). Gated by
+`AppSettings.AutoUpdate` (default true). `manager.IsInstalled` is false on a plain dev run
+(from `bin\`), so updates only ever happen for an installed copy.
+- **Repo**: `UpdateService.RepoUrl` = `https://github.com/LbillaSupport/Claude-pet`.
+- **Keep `Velopack` (NuGet) and the `vpk` CLI on the SAME version** (both 1.2.0) — a
+  mismatch logs a runtime compatibility warning at pack time.
 - **Cut a release**: `.\build-release.ps1 -Version X.Y.Z` — publishes self-contained, then
   `vpk pack` produces `.\Releases\` (`ClaudeBuddy-win-Setup.exe` = the friendly installer +
-  full/delta `.nupkg` + `releases.win.json`). Upload **all** of `Releases\` to a GitHub
-  Release tagged `vX.Y.Z`. Users run `Setup.exe`; existing installs self-update on restart.
-- The script auto-installs the `vpk` global tool if missing.
+  full **and delta** `.nupkg` + `releases.win.json`/`RELEASES`/`assets.win.json`). Then
+  `gh release create vX.Y.Z <all of Releases\*> --target main`. Installs to
+  `%LocalAppData%\ClaudeBuddy\` (`current\`, `packages\`), makes Desktop+Start-Menu
+  shortcuts and an "Add/Remove Programs" entry. `.\Releases\` and `.\dist\` are gitignored.
+- Running `Setup.exe` over an existing install shows Velopack's "already installed →
+  Update?" dialog (expected); the *silent background* updater shows no dialog.
+- The script auto-installs the `vpk` global tool if missing. Verified: a 1.1.2→1.1.3
+  background update downloaded + applied + relaunched on its own.
 
 ### Verifying a visual change (the screenshot loop)
 The mascot is small and wanders, so capture the **primary screen** and crop:
