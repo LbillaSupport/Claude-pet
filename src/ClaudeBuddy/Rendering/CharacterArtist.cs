@@ -67,13 +67,38 @@ public sealed class CharacterArtist
         // toward the real cursor regardless of which way the body faces.
         float lookX = pose.EyeLookX * sign;
 
-        DrawLegs(canvas, h, pose, palette);
-        DrawArms(canvas, h, pose, palette, behind: true);
+        // Drawn back-to-front so the body overlaps the limbs. The silhouette and face
+        // depend on the skin's style (classic Claw'd, Creeper, or floaty Ghast).
+        if (palette.Style == SkinStyle.Ghast)
+        {
+            DrawTentacles(canvas, h, pose, palette);
+        }
+        else
+        {
+            DrawLegs(canvas, h, pose, palette);
+        }
+
         DrawBody(canvas, h, palette);
-        DrawBelly(canvas, h, palette);
-        DrawSunburst(canvas, h, palette, pose);
-        DrawFace(canvas, h, pose, palette, lookX);
-        DrawArms(canvas, h, pose, palette, behind: false);
+
+        switch (palette.Style)
+        {
+            case SkinStyle.Creeper:
+                DrawCreeperFace(canvas, h, pose, palette, lookX);
+                break;
+            case SkinStyle.Ghast:
+                DrawGhastFace(canvas, h, pose, palette, lookX);
+                break;
+            case SkinStyle.Nicolaia:
+                // Suit + shirt sit on the torso below the face; curls + hat go on top.
+                DrawNicolaiaSuit(canvas, h, palette);
+                DrawFace(canvas, h, pose, palette, lookX);
+                DrawNicolaiaCrown(canvas, h, pose, palette);
+                break;
+            default:
+                DrawFace(canvas, h, pose, palette, lookX);
+                break;
+        }
+
         DrawProps(canvas, h, pose, palette);
 
         canvas.Restore();
@@ -90,196 +115,155 @@ public sealed class CharacterArtist
         canvas.DrawOval(new SKRect(x - rx, groundY - ry, x + rx, groundY + ry), _shadow);
     }
 
+    // Claw'd's chunky proportions, expressed as fractions of the character height so it
+    // stays crisp at any DPI. The body is a near-square with barely-rounded corners.
+    private const float BodyWidth = 0.78f;
+    private const float BodyTop = -0.90f;
+    private const float BodyBottom = -0.12f;
+    private const float CornerRadius = 0.035f;
+
     private void DrawBody(SKCanvas canvas, float h, SkinPalette palette)
     {
-        float bodyW = 0.62f * h;
-        float bodyH = 0.80f * h;
-        float cx = 0f;
-        float cy = -0.46f * h;
-        var rect = new SKRect(cx - (bodyW / 2f), cy - (bodyH / 2f), cx + (bodyW / 2f), cy + (bodyH / 2f));
+        float halfW = BodyWidth * 0.5f * h;
+        var rect = new SKRect(-halfW, BodyTop * h, halfW, BodyBottom * h);
+        float r = CornerRadius * h;
 
+        // Flat terracotta block — the signature Claw'd silhouette.
         _fill.Color = palette.Body.ToSk();
-        canvas.DrawOval(rect, _fill);
+        canvas.DrawRoundRect(rect, r, r, _fill);
 
-        // Bottom shading: a slightly darker overlay ellipse for soft volume.
-        _fill.Color = palette.BodyShadow.ToSk(0.55f);
-        var shade = new SKRect(rect.Left + (bodyW * 0.08f), cy + (bodyH * 0.06f), rect.Right - (bodyW * 0.08f), rect.Bottom);
+        // A single darker band along the bottom grounds the block without breaking the
+        // flat pixel feel; a faint top sheen keeps it from looking dead.
         canvas.Save();
-        canvas.ClipRect(rect);
-        canvas.DrawOval(shade, _fill);
+        canvas.ClipRoundRect(new SKRoundRect(rect, r, r), antialias: true);
+        _fill.Color = palette.BodyShadow.ToSk(0.45f);
+        canvas.DrawRect(new SKRect(rect.Left, rect.Bottom - (0.12f * h), rect.Right, rect.Bottom), _fill);
+        _fill.Color = new SKColor(255, 255, 255, 26);
+        canvas.DrawRect(new SKRect(rect.Left, rect.Top, rect.Right, rect.Top + (0.10f * h)), _fill);
         canvas.Restore();
-
-        // Top highlight for a gentle sheen.
-        _fill.Color = new SKColor(255, 255, 255, 38);
-        var hi = new SKRect(cx - (bodyW * 0.28f), cy - (bodyH * 0.42f), cx + (bodyW * 0.18f), cy - (bodyH * 0.06f));
-        canvas.DrawOval(hi, _fill);
     }
 
-    private void DrawBelly(SKCanvas canvas, float h, SkinPalette palette)
-    {
-        float w = 0.34f * h;
-        float bh = 0.42f * h;
-        float cy = -0.34f * h;
-        _fill.Color = palette.Belly.ToSk();
-        canvas.DrawOval(new SKRect(-w / 2f, cy - (bh / 2f), w / 2f, cy + (bh / 2f)), _fill);
-    }
-
-    private void DrawSunburst(SKCanvas canvas, float h, SkinPalette palette, Pose pose)
-    {
-        // A small Anthropic-style radial badge on the chest. Twinkles a touch when proud/excited.
-        float cy = -0.30f * h;
-        float r = 0.058f * h * (1f + (0.12f * pose.StarEyes));
-        _fill.Color = palette.Accent.ToSk(0.9f);
-
-        const int rays = 8;
-        using var path = new SKPath();
-        for (int i = 0; i < rays; i++)
-        {
-            float a = (MathUtil.Tau * i) / rays;
-            float bx = MathF.Cos(a) * r;
-            float by = MathF.Sin(a) * r;
-            float wob = r * 0.34f;
-            float px = MathF.Cos(a + 0.32f) * wob;
-            float py = MathF.Sin(a + 0.32f) * wob;
-            path.MoveTo(0, cy);
-            path.LineTo(px, cy + py);
-            path.LineTo(bx, cy + by);
-            float nx = MathF.Cos(a - 0.32f) * wob;
-            float ny = MathF.Sin(a - 0.32f) * wob;
-            path.LineTo(nx, cy + ny);
-            path.Close();
-        }
-
-        canvas.DrawPath(path, _fill);
-        _fill.Color = palette.Belly.ToSk();
-        canvas.DrawCircle(0, cy, r * 0.30f, _fill);
-    }
+    // Four stubby legs poke out below the body. Layout is symmetric so mirroring the
+    // body for facing keeps it looking right.
+    private static readonly float[] LegCenters = { -0.255f, -0.085f, 0.085f, 0.255f };
+    private const float LegWidth = 0.12f;
+    private const float LegLength = 0.13f;
 
     private void DrawLegs(SKCanvas canvas, float h, Pose pose, SkinPalette palette)
     {
-        float footY = -0.02f * h;
-        float spread = 0.13f * h;
-        float footR = 0.075f * h;
-        float swing = MathF.Sin(pose.LegPhase) * pose.StrideAmount * 0.12f * h;
-        float lift = MathF.Max(0f, MathF.Sin(pose.LegPhase)) * pose.StrideAmount * 0.05f * h;
+        float top = BodyBottom * h;            // tuck the legs slightly under the body
+        float legW = LegWidth * h;
+        float fullLen = LegLength * h;
+        float corner = legW * 0.32f;
 
-        // Feet share the body's shadow colour for a grounded look.
-        _fill.Color = palette.BodyShadow.ToSk();
+        // A gentle four-beat shuffle while walking; outer legs raise to "wave".
+        bool waveLeft = pose.ArmLeft > 1.6f;
+        bool waveRight = pose.ArmRight > 1.6f;
 
-        DrawFoot(canvas, -spread + swing, footY - lift, footR);
-        DrawFoot(canvas, spread - swing, footY - (MathF.Max(0f, -MathF.Sin(pose.LegPhase)) * pose.StrideAmount * 0.05f * h), footR);
-    }
-
-    private void DrawFoot(SKCanvas canvas, float x, float y, float r)
-    {
-        canvas.DrawOval(new SKRect(x - r, y - (r * 0.7f), x + r, y + (r * 0.7f)), _fill);
-    }
-
-    private void DrawArms(SKCanvas canvas, float h, Pose pose, SkinPalette palette, bool behind)
-    {
-        // Behind pass draws the limbs that sit under the body; front pass draws a raised
-        // arm over the body so waves/celebrations read clearly.
-        float shoulderY = -0.54f * h;
-        float shoulderX = 0.27f * h;
-        float armLen = 0.30f * h;
-        float thickness = 0.11f * h;
-
-        bool leftFront = pose.ArmLeft > 1.6f;
-        bool rightFront = pose.ArmRight > 1.6f;
-
-        if (behind ? !leftFront : leftFront)
+        for (int i = 0; i < LegCenters.Length; i++)
         {
-            DrawArm(canvas, -shoulderX, shoulderY, pose.ArmLeft, -1, armLen, thickness, palette);
-        }
+            float x = LegCenters[i] * h;
+            float phase = pose.LegPhase + (i * MathUtil.HalfPi);
+            float walkLift = MathF.Max(0f, MathF.Sin(phase)) * pose.StrideAmount * 0.06f * h;
 
-        if (behind ? !rightFront : rightFront)
-        {
-            DrawArm(canvas, shoulderX, shoulderY, pose.ArmRight, 1, armLen, thickness, palette);
+            float waveLift = 0f;
+            if ((waveLeft && i == 0) || (waveRight && i == LegCenters.Length - 1))
+            {
+                // Tuck the outer leg up against the body like a raised little hand.
+                waveLift = fullLen * 0.7f;
+            }
+
+            float lift = walkLift + waveLift;
+            float legTop = top - 0.001f;       // overlap the body by a hair to avoid a seam
+            float legBottom = -lift;           // feet rest at y≈0 (the ground)
+            var rect = new SKRect(x - (legW / 2f), legTop, x + (legW / 2f), legBottom);
+
+            _fill.Color = palette.Body.ToSk();
+            canvas.DrawRoundRect(rect, corner, corner, _fill);
+
+            // Darker tip so the foot reads against the floor.
+            _fill.Color = palette.BodyShadow.ToSk(0.55f);
+            canvas.DrawRoundRect(
+                new SKRect(rect.Left, rect.Bottom - (legW * 0.4f), rect.Right, rect.Bottom),
+                corner, corner, _fill);
         }
     }
 
-    private void DrawArm(SKCanvas canvas, float sxp, float syp, float angle, int sideOut, float len, float thickness, SkinPalette palette)
-    {
-        float hx = sxp + (MathF.Sin(angle) * len * sideOut);
-        float hy = syp + (MathF.Cos(angle) * len);
-
-        _stroke.Color = palette.Body.ToSk();
-        _stroke.StrokeWidth = thickness;
-        canvas.DrawLine(sxp, syp, hx, hy, _stroke);
-
-        // Little rounded hand.
-        _fill.Color = palette.Body.ToSk();
-        canvas.DrawCircle(hx, hy, thickness * 0.62f, _fill);
-        _fill.Color = palette.BodyShadow.ToSk(0.5f);
-        canvas.DrawCircle(hx, hy + (thickness * 0.12f), thickness * 0.5f, _fill);
-    }
+    // Two black square eyes, set high on the block like the original Claw'd.
+    private const float EyeSize = 0.18f;
+    private const float EyeOffsetX = 0.155f;
+    private const float EyeCenterY = -0.62f;
 
     private void DrawFace(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
     {
-        float eyeY = -0.60f * h;
-        float eyeX = 0.155f * h;
-        float eyeR = 0.085f * h;
+        float eyeX = EyeOffsetX * h;
+        float eyeY = EyeCenterY * h;
+        float s = EyeSize * h;
 
-        // Blush.
+        // Soft blush squares appear when embarrassed or being petted.
         if (pose.Blush > 0.02f)
         {
-            _fill.Color = palette.Blush.ToSk(pose.Blush * 0.8f);
-            float by = -0.50f * h;
-            float bx = 0.24f * h;
-            canvas.DrawOval(new SKRect(-bx - (eyeR * 0.9f), by - (eyeR * 0.5f), -bx + (eyeR * 0.9f), by + (eyeR * 0.5f)), _fill);
-            canvas.DrawOval(new SKRect(bx - (eyeR * 0.9f), by - (eyeR * 0.5f), bx + (eyeR * 0.9f), by + (eyeR * 0.5f)), _fill);
+            _fill.Color = palette.Blush.ToSk(pose.Blush * 0.85f);
+            float by = eyeY + (s * 1.1f);
+            float bw = s * 0.7f;
+            float bx = eyeX + (s * 0.45f);
+            float corner = bw * 0.3f;
+            canvas.DrawRoundRect(new SKRect(-bx - bw, by - (bw * 0.4f), -bx + bw, by + (bw * 0.4f)), corner, corner, _fill);
+            canvas.DrawRoundRect(new SKRect(bx - bw, by - (bw * 0.4f), bx + bw, by + (bw * 0.4f)), corner, corner, _fill);
         }
 
-        DrawEye(canvas, -eyeX, eyeY, eyeR, pose, palette, lookX);
-        DrawEye(canvas, eyeX, eyeY, eyeR, pose, palette, lookX);
+        DrawEye(canvas, -eyeX, eyeY, s, pose, palette, lookX);
+        DrawEye(canvas, eyeX, eyeY, s, pose, palette, lookX);
 
-        DrawBrows(canvas, h, pose, palette, eyeX, eyeY, eyeR);
-        DrawMouth(canvas, h, pose, palette);
+        DrawBrows(canvas, pose, palette, eyeX, eyeY, s);
+        DrawMouth(canvas, h, pose, palette, eyeY, s);
     }
 
-    private void DrawEye(SKCanvas canvas, float ex, float ey, float r, Pose pose, SkinPalette palette, float lookX)
+    private void DrawEye(SKCanvas canvas, float ex, float ey, float s, Pose pose, SkinPalette palette, float lookX)
     {
+        float half = s * 0.5f;
+        float corner = s * 0.14f;
+
         if (pose.HappyEyes > 0.5f)
         {
-            // ^_^ upward arc.
+            // ^ ^ — a chunky upward chevron.
             _stroke.Color = palette.Pupil.ToSk();
-            _stroke.StrokeWidth = r * 0.55f;
-            using var path = new SKPath();
-            path.MoveTo(ex - (r * 0.8f), ey + (r * 0.2f));
-            path.QuadTo(ex, ey - (r * 0.9f), ex + (r * 0.8f), ey + (r * 0.2f));
-            canvas.DrawPath(path, _stroke);
+            _stroke.StrokeWidth = s * 0.34f;
+            _stroke.StrokeCap = SKStrokeCap.Round;
+            canvas.DrawLine(ex - half, ey + (half * 0.4f), ex, ey - (half * 0.5f), _stroke);
+            canvas.DrawLine(ex, ey - (half * 0.5f), ex + half, ey + (half * 0.4f), _stroke);
             return;
         }
 
         if (pose.StarEyes > 0.5f)
         {
-            DrawStarEye(canvas, ex, ey, r, palette);
+            DrawStarEye(canvas, ex, ey, half, palette);
             return;
         }
 
-        float open = MathUtil.Clamp(pose.EyeOpen, 0f, 1.4f);
-        if (open < 0.12f)
+        float open = MathUtil.Clamp(pose.EyeOpen, 0f, 1.2f);
+        if (open < 0.14f)
         {
-            // Closed: a gentle curved line.
-            _stroke.Color = palette.Pupil.ToSk();
-            _stroke.StrokeWidth = r * 0.4f;
-            using var line = new SKPath();
-            line.MoveTo(ex - (r * 0.7f), ey);
-            line.QuadTo(ex, ey + (r * 0.35f), ex + (r * 0.7f), ey);
-            canvas.DrawPath(line, _stroke);
+            // Closed/blink — a short flat bar.
+            _fill.Color = palette.Pupil.ToSk();
+            float barH = s * 0.16f;
+            canvas.DrawRoundRect(new SKRect(ex - half, ey - (barH / 2f), ex + half, ey + (barH / 2f)), barH * 0.5f, barH * 0.5f, _fill);
             return;
         }
 
-        float ry = r * open;
-        _fill.Color = palette.Pupil.ToSk();
-        float px = ex + (lookX * r * 0.4f);
-        float py = ey + (pose.EyeLookY * r * 0.35f);
-        canvas.DrawOval(new SKRect(px - r, py - ry, px + r, py + ry), _fill);
+        // Open: a solid black square that nudges toward the cursor.
+        float lookOffset = half * 0.34f;
+        float px = ex + (lookX * lookOffset);
+        float py = ey + (pose.EyeLookY * lookOffset);
+        float h2 = half * open;
 
-        // Sparkle highlight.
-        _fill.Color = new SKColor(255, 255, 255, 235);
-        canvas.DrawCircle(px - (r * 0.3f), py - (ry * 0.4f), r * 0.28f, _fill);
-        canvas.DrawCircle(px + (r * 0.25f), py + (ry * 0.25f), r * 0.12f, _fill);
+        _fill.Color = palette.Pupil.ToSk();
+        canvas.DrawRoundRect(new SKRect(px - half, py - h2, px + half, py + h2), corner, corner, _fill);
+
+        // A single tiny glint keeps the eyes alive without losing the pixel look.
+        _fill.Color = new SKColor(255, 255, 255, 220);
+        float g = s * 0.16f;
+        canvas.DrawRoundRect(new SKRect(px - (half * 0.55f), py - (h2 * 0.55f), px - (half * 0.55f) + g, py - (h2 * 0.55f) + g), g * 0.3f, g * 0.3f, _fill);
     }
 
     private void DrawStarEye(SKCanvas canvas, float ex, float ey, float r, SkinPalette palette)
@@ -306,51 +290,280 @@ public sealed class CharacterArtist
         canvas.DrawPath(path, _fill);
     }
 
-    private void DrawBrows(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float eyeX, float eyeY, float eyeR)
+    private void DrawBrows(SKCanvas canvas, Pose pose, SkinPalette palette, float eyeX, float eyeY, float s)
     {
         if (MathF.Abs(pose.BrowAngle) < 0.05f || pose.HappyEyes > 0.5f)
         {
             return;
         }
 
-        _stroke.Color = palette.Pupil.ToSk(0.85f);
-        _stroke.StrokeWidth = eyeR * 0.32f;
-        float browY = eyeY - (eyeR * 1.5f);
-        float tilt = pose.BrowAngle * eyeR * 0.6f;
-        float len = eyeR * 0.9f;
+        _stroke.Color = palette.Pupil.ToSk(0.9f);
+        _stroke.StrokeWidth = s * 0.22f;
+        _stroke.StrokeCap = SKStrokeCap.Round;
+        float browY = eyeY - (s * 0.95f);
+        float tilt = pose.BrowAngle * s * 0.4f;
+        float len = s * 0.55f;
 
         // Worried/angry (negative) tilts inner ends down; surprised (positive) raises both.
         canvas.DrawLine(-eyeX - len, browY + tilt, -eyeX + len, browY - tilt, _stroke);
         canvas.DrawLine(eyeX - len, browY - tilt, eyeX + len, browY + tilt, _stroke);
     }
 
-    private void DrawMouth(SKCanvas canvas, float h, Pose pose, SkinPalette palette)
+    private void DrawMouth(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float eyeY, float s)
     {
-        float my = -0.42f * h;
-        float mw = 0.10f * h;
-
-        if (pose.MouthOpen > 0.14f)
+        // Claw'd is mouthless at rest; a little mouth only appears for big moments
+        // (yawning, snoring, gasping) so the clean face is preserved the rest of the time.
+        if (pose.MouthOpen <= 0.14f)
         {
-            float openH = pose.MouthOpen * 0.16f * h;
-            _fill.Color = palette.Mouth.ToSk();
-            using var mouth = new SKPath();
-            var rect = new SKRect(-mw, my - (openH * 0.3f), mw, my + openH);
-            mouth.AddRoundRect(rect, mw * 0.8f, openH * 0.6f);
-            canvas.DrawPath(mouth, _fill);
-
-            // Tongue.
-            _fill.Color = palette.Blush.ToSk();
-            canvas.DrawOval(new SKRect(-mw * 0.6f, my + (openH * 0.2f), mw * 0.6f, my + openH), _fill);
             return;
         }
 
-        _stroke.Color = palette.Mouth.ToSk();
-        _stroke.StrokeWidth = 0.022f * h;
-        float curve = pose.MouthCurve * 0.07f * h;
-        using var path = new SKPath();
-        path.MoveTo(-mw, my);
-        path.QuadTo(0, my + curve, mw, my);
-        canvas.DrawPath(path, _stroke);
+        float my = eyeY + (s * 1.6f);
+        float openH = pose.MouthOpen * 0.13f * h;
+        float mw = 0.075f * h;
+
+        _fill.Color = palette.Pupil.ToSk();
+        var rect = new SKRect(-mw, my - (openH * 0.25f), mw, my + openH);
+        canvas.DrawRoundRect(rect, mw * 0.45f, openH * 0.45f, _fill);
+
+        _fill.Color = palette.Blush.ToSk();
+        canvas.DrawOval(new SKRect(-mw * 0.55f, my + (openH * 0.25f), mw * 0.55f, my + openH), _fill);
+    }
+
+    // ---- Creeper -------------------------------------------------------------
+
+    private void DrawCreeperFace(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    {
+        float eyeX = 0.18f * h;
+        float eyeY = -0.66f * h;
+        float s = 0.2f * h;
+        float open = MathUtil.Clamp(pose.EyeOpen, 0.12f, 1.2f);
+
+        _fill.Color = palette.Pupil.ToSk();
+
+        // Two square eyes (no glint — keep it menacing). They still blink/track a little.
+        for (int side = -1; side <= 1; side += 2)
+        {
+            float ex = (side * eyeX) + (lookX * s * 0.18f);
+            float half = s * 0.5f;
+            float hy = half * open;
+            canvas.DrawRoundRect(new SKRect(ex - half, eyeY - hy, ex + half, eyeY + hy), s * 0.1f, s * 0.1f, _fill);
+        }
+
+        // The signature creeper frown: a tall central bar plus two lower side blocks.
+        float r = h * 0.012f;
+        canvas.DrawRoundRect(new SKRect(-0.07f * h, -0.58f * h, 0.07f * h, -0.30f * h), r, r, _fill);
+        canvas.DrawRoundRect(new SKRect(-0.21f * h, -0.40f * h, -0.07f * h, -0.22f * h), r, r, _fill);
+        canvas.DrawRoundRect(new SKRect(0.07f * h, -0.40f * h, 0.21f * h, -0.22f * h), r, r, _fill);
+    }
+
+    // ---- Ghast ---------------------------------------------------------------
+
+    private static readonly float[] GhastTentacleX = { -0.3f, -0.2f, -0.1f, 0f, 0.1f, 0.2f, 0.3f };
+    private static readonly float[] GhastTentacleLen = { 0.16f, 0.24f, 0.3f, 0.26f, 0.3f, 0.24f, 0.16f };
+
+    private void DrawTentacles(SKCanvas canvas, float h, Pose pose, SkinPalette palette)
+    {
+        float top = (BodyBottom * h) + (0.02f * h);
+        float w = 0.07f * h;
+        float corner = w * 0.5f;
+
+        for (int i = 0; i < GhastTentacleX.Length; i++)
+        {
+            float baseX = GhastTentacleX[i] * h;
+            float len = GhastTentacleLen[i] * h;
+            float sway = MathF.Sin((pose.LegPhase * 0.6f) + (i * 0.8f)) * 0.03f * h;
+            float x = baseX + sway;
+
+            _fill.Color = palette.Body.ToSk();
+            canvas.DrawRoundRect(new SKRect(x - (w / 2f), top, x + (w / 2f), top + len), corner, corner, _fill);
+            _fill.Color = palette.BodyShadow.ToSk(0.6f);
+            canvas.DrawRoundRect(new SKRect(x - (w / 2f), top + len - w, x + (w / 2f), top + len), corner, corner, _fill);
+        }
+    }
+
+    private void DrawGhastFace(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    {
+        float eyeX = 0.17f * h;
+        float eyeY = -0.62f * h;
+        bool agitated = pose.MouthOpen > 0.3f; // shooting / startled
+
+        _fill.Color = palette.Pupil.ToSk();
+
+        if (agitated)
+        {
+            // Wide, alarmed dark eyes.
+            float half = 0.075f * h;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float ex = side * eyeX;
+                canvas.DrawRoundRect(new SKRect(ex - half, eyeY - half, ex + half, eyeY + half), half * 0.3f, half * 0.3f, _fill);
+            }
+
+            // The big red maw.
+            _fill.Color = palette.Mouth.ToSk();
+            float mw = 0.13f * h;
+            float my = -0.36f * h;
+            float mh = pose.MouthOpen * 0.2f * h;
+            canvas.DrawRoundRect(new SKRect(-mw, my, mw, my + mh), mw * 0.4f, mw * 0.4f, _fill);
+        }
+        else
+        {
+            // Sad, slanted little eyes ("\  /").
+            _stroke.Color = palette.Pupil.ToSk();
+            _stroke.StrokeWidth = 0.05f * h;
+            _stroke.StrokeCap = SKStrokeCap.Round;
+            float dx = 0.05f * h;
+            float dy = 0.045f * h;
+            canvas.DrawLine(-eyeX - dx, eyeY - dy, -eyeX + dx, eyeY + dy, _stroke);
+            canvas.DrawLine(eyeX + dx, eyeY - dy, eyeX - dx, eyeY + dy, _stroke);
+
+            // A small downturned frown.
+            _stroke.StrokeWidth = 0.04f * h;
+            using var frown = new SKPath();
+            float my = -0.4f * h;
+            float mw = 0.1f * h;
+            frown.MoveTo(-mw, my);
+            frown.QuadTo(0, my - (0.05f * h), mw, my);
+            canvas.DrawPath(frown, _stroke);
+        }
+    }
+
+    // ---- Nicolaia ------------------------------------------------------------
+    // The classic block is reused as the face/skin; a black three-piece suit is
+    // painted over the lower torso, brown side-curls (peyot) hang past the cheeks,
+    // and a tall black top hat sits on the crown. Palette mapping:
+    //   Body = skin tone · BodyShadow = black suit/hat · Belly = white shirt
+    //   Pupil = eyes · Accent = curl brown.
+
+    private void DrawNicolaiaSuit(SKCanvas canvas, float h, SkinPalette palette)
+    {
+        float halfW = BodyWidth * 0.5f * h;
+        var rect = new SKRect(-halfW, BodyTop * h, halfW, BodyBottom * h);
+        float corner = CornerRadius * h;
+
+        // Clip to the body so the suit can't bleed past the block's rounded edge.
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(rect, corner, corner), antialias: true);
+
+        float collarTop = -0.42f * h;   // top of the suit, a little below the eyes
+        float bottom = BodyBottom * h;
+
+        // The black jacket fills the lower torso edge-to-edge — no skin peeks through.
+        _fill.Color = palette.BodyShadow.ToSk();
+        canvas.DrawRect(new SKRect(-halfW, collarTop, halfW, bottom), _fill);
+
+        // A white shirt: a broad band across the top (so no skin shows between the
+        // lapels) tapering into a wide V down the chest.
+        _fill.Color = palette.Belly.ToSk();
+        float collarHalf = 0.22f * h;       // shirt width at the collar
+        float vBottom = -0.14f * h;         // where the white V tapers shut
+        using (var shirt = new SKPath())
+        {
+            shirt.MoveTo(-collarHalf, collarTop);
+            shirt.LineTo(collarHalf, collarTop);
+            shirt.LineTo(0.10f * h, vBottom);
+            shirt.LineTo(-0.10f * h, vBottom);
+            shirt.Close();
+            canvas.DrawPath(shirt, _fill);
+        }
+
+        // Jacket lapels: two slim dark wedges on the OUTER edges of the collar, leaving a
+        // generous white centre showing between them.
+        _fill.Color = palette.Pupil.ToSk(0.9f);
+        for (int side = -1; side <= 1; side += 2)
+        {
+            using var lapel = new SKPath();
+            lapel.MoveTo(side * collarHalf, collarTop);          // outer top corner
+            lapel.LineTo(side * 0.12f * h, collarTop);           // inner top corner
+            lapel.LineTo(side * 0.10f * h, vBottom);             // taper down beside the V
+            lapel.Close();
+            canvas.DrawPath(lapel, _fill);
+        }
+
+        // A small dark bow-tie / collar knot at the very top of the V.
+        _fill.Color = palette.Pupil.ToSk();
+        float knot = 0.04f * h;
+        using (var bow = new SKPath())
+        {
+            bow.MoveTo(-knot, collarTop + (knot * 0.2f));
+            bow.LineTo(0f, collarTop + (knot * 0.9f));
+            bow.LineTo(-knot, collarTop + (knot * 1.6f));
+            bow.Close();
+            bow.MoveTo(knot, collarTop + (knot * 0.2f));
+            bow.LineTo(0f, collarTop + (knot * 0.9f));
+            bow.LineTo(knot, collarTop + (knot * 1.6f));
+            bow.Close();
+            canvas.DrawPath(bow, _fill);
+        }
+
+        // A couple of tiny waistcoat buttons down the white shirt.
+        float bsize = 0.014f * h;
+        for (int i = 0; i < 2; i++)
+        {
+            float by = -0.28f * h + (i * 0.06f * h);
+            canvas.DrawCircle(0f, by, bsize, _fill);
+        }
+
+        canvas.Restore();
+    }
+
+    private void DrawNicolaiaCrown(SKCanvas canvas, float h, Pose pose, SkinPalette palette)
+    {
+        // ---- Side-curls (peyot): a symmetric wavy lock down each side of the face. ----
+        // Anchored just inside the face edge (half-width 0.39h) so they frame the cheeks
+        // evenly, mirrored left/right.
+        float cheekX = 0.37f * h;
+        float curlTop = -0.70f * h;          // just under the hat brim, beside the eyes
+        float curlLen = 0.40f * h;           // hangs down past the cheek
+        _stroke.Color = palette.Accent.ToSk();
+        _stroke.StrokeWidth = 0.065f * h;
+        _stroke.StrokeCap = SKStrokeCap.Round;
+
+        // A subtle sway brings the curls to life (re-uses the idle leg phase).
+        float sway = MathF.Sin(pose.LegPhase * 0.5f) * 0.012f * h;
+        float wave = 0.04f * h;              // how far the lock waves in/out
+
+        for (int side = -1; side <= 1; side += 2)
+        {
+            float x = side * cheekX;
+            // Two stacked S-curves, mirrored by `side`. The control points push outward
+            // then inward so both curls read as the same shape on each side.
+            using var curl = new SKPath();
+            curl.MoveTo(x, curlTop);
+            curl.QuadTo(x + (side * wave) + sway, curlTop + (curlLen * 0.30f), x, curlTop + (curlLen * 0.55f));
+            curl.QuadTo(x - (side * wave) + sway, curlTop + (curlLen * 0.80f), x + (side * wave * 0.4f), curlTop + curlLen);
+            canvas.DrawPath(curl, _stroke);
+        }
+
+        // ---- Top hat sitting on the crown of the block. ----
+        // The brim is pulled DOWN onto the face (its bottom edge sinks slightly into the
+        // block) so no sliver of skin shows between the hat and the head. It's also wider
+        // than the block so the upper corners are covered.
+        float brimY = BodyTop * h;            // the block's top edge
+        float brimHalf = 0.44f * h;           // wider than the body half-width (0.39h)
+        float brimBottom = brimY + (0.06f * h); // sink into the face — kills the skin line
+        float brimTop = brimY - (0.04f * h);
+        float crownHalf = 0.24f * h;
+        float crownTop = brimY - (0.36f * h);
+
+        _fill.Color = palette.BodyShadow.ToSk();
+
+        // The tall crown (overlaps the brim so there's no seam between them).
+        canvas.DrawRoundRect(
+            new SKRect(-crownHalf, crownTop, crownHalf, brimBottom),
+            crownHalf * 0.12f, crownHalf * 0.12f, _fill);
+
+        // The wide brim, sunk onto the head.
+        canvas.DrawRoundRect(
+            new SKRect(-brimHalf, brimTop, brimHalf, brimBottom),
+            (brimBottom - brimTop) * 0.4f, (brimBottom - brimTop) * 0.4f, _fill);
+
+        // A faint hat band + a soft sheen line so the black hat isn't a flat void.
+        _fill.Color = palette.Pupil.ToSk(0.6f);
+        canvas.DrawRect(new SKRect(-crownHalf, brimTop - (0.03f * h), crownHalf, brimTop), _fill);
+        _fill.Color = new SKColor(255, 255, 255, 22);
+        canvas.DrawRect(new SKRect(-crownHalf + (0.02f * h), crownTop + (0.02f * h), -crownHalf + (0.05f * h), brimTop), _fill);
     }
 
     private void DrawProps(SKCanvas canvas, float h, Pose pose, SkinPalette palette)
@@ -378,62 +591,98 @@ public sealed class CharacterArtist
 
     private void DrawCoffee(SKCanvas canvas, float h, float a)
     {
-        float x = 0.34f * h;
-        float y = -0.40f * h;
-        float w = 0.10f * h;
-        float ch = 0.11f * h;
-        _fill.Color = new SKColor(0xF7, 0xF3, 0xEC, (byte)(255 * a));
-        canvas.DrawRoundRect(new SKRect(x - (w / 2f), y - (ch / 2f), x + (w / 2f), y + (ch / 2f)), w * 0.2f, w * 0.2f, _fill);
-        _fill.Color = new SKColor(0x6F, 0x3F, 0x2A, (byte)(255 * a));
-        canvas.DrawOval(new SKRect(x - (w * 0.36f), y - (ch * 0.36f), x + (w * 0.36f), y - (ch * 0.12f)), _fill);
-        _stroke.Color = new SKColor(0xF7, 0xF3, 0xEC, (byte)(255 * a));
-        _stroke.StrokeWidth = h * 0.014f;
-        canvas.DrawArc(new SKRect(x + (w * 0.3f), y - (ch * 0.3f), x + (w * 0.8f), y + (ch * 0.3f)), -90, 180, false, _stroke);
+        // Held out to the right of the block (clear of the body's 0.39h half-width).
+        float x = 0.52f * h;
+        float y = -0.44f * h;
+        float w = 0.13f * h;
+        float ch = 0.15f * h;
+        byte alpha = (byte)(255 * a);
+
+        _fill.Color = new SKColor(0xF7, 0xF3, 0xEC, alpha);
+        canvas.DrawRoundRect(new SKRect(x - (w / 2f), y - (ch / 2f), x + (w / 2f), y + (ch / 2f)), w * 0.22f, w * 0.22f, _fill);
+        _fill.Color = new SKColor(0x6F, 0x3F, 0x2A, alpha);
+        canvas.DrawOval(new SKRect(x - (w * 0.38f), y - (ch * 0.38f), x + (w * 0.38f), y - (ch * 0.1f)), _fill);
+
+        _stroke.Color = new SKColor(0xF7, 0xF3, 0xEC, alpha);
+        _stroke.StrokeWidth = h * 0.016f;
+        canvas.DrawArc(new SKRect(x + (w * 0.32f), y - (ch * 0.28f), x + (w * 0.85f), y + (ch * 0.32f)), -90, 180, false, _stroke);
+
+        // Two little wisps of steam.
+        _stroke.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)(120 * a));
+        _stroke.StrokeWidth = h * 0.012f;
+        for (int i = -1; i <= 1; i += 2)
+        {
+            using var steam = new SKPath();
+            float sx = x + (i * w * 0.2f);
+            float top = y - (ch * 0.7f);
+            steam.MoveTo(sx, y - (ch * 0.45f));
+            steam.QuadTo(sx + (w * 0.18f), (y - (ch * 0.55f) + top) * 0.5f, sx, top);
+            canvas.DrawPath(steam, _stroke);
+        }
     }
 
     private void DrawBook(SKCanvas canvas, float h, float a)
     {
-        float y = -0.30f * h;
-        float w = 0.34f * h;
-        float bh = 0.16f * h;
-        _fill.Color = new SKColor(0xF7, 0xF3, 0xEC, (byte)(255 * a));
-        canvas.DrawRoundRect(new SKRect(-w / 2f, y - (bh / 2f), w / 2f, y + (bh / 2f)), bh * 0.15f, bh * 0.15f, _fill);
-        _stroke.Color = new SKColor(0xC2, 0x62, 0x43, (byte)(255 * a));
-        _stroke.StrokeWidth = h * 0.012f;
-        canvas.DrawLine(0, y - (bh / 2f), 0, y + (bh / 2f), _stroke);
-        canvas.DrawLine(-w * 0.32f, y - (bh * 0.22f), -w * 0.08f, y - (bh * 0.22f), _stroke);
-        canvas.DrawLine(w * 0.08f, y - (bh * 0.22f), w * 0.32f, y - (bh * 0.22f), _stroke);
+        // Held low and forward so it never covers Claw'd's eyes (it reads down at it).
+        float y = -0.18f * h;
+        float w = 0.5f * h;
+        float bh = 0.2f * h;
+        byte alpha = (byte)(255 * a);
+
+        _fill.Color = new SKColor(0xF7, 0xF3, 0xEC, alpha);
+        canvas.DrawRoundRect(new SKRect(-w / 2f, y - (bh / 2f), w / 2f, y + (bh / 2f)), bh * 0.16f, bh * 0.16f, _fill);
+        _stroke.Color = new SKColor(0xC2, 0x62, 0x43, alpha);
+        _stroke.StrokeWidth = h * 0.013f;
+        canvas.DrawLine(0, y - (bh * 0.46f), 0, y + (bh * 0.46f), _stroke); // spine
+        for (int side = -1; side <= 1; side += 2)
+        {
+            for (int line = 0; line < 3; line++)
+            {
+                float ly = y - (bh * 0.26f) + (line * bh * 0.26f);
+                canvas.DrawLine(side * w * 0.08f, ly, side * w * 0.4f, ly, _stroke);
+            }
+        }
     }
 
     private void DrawThinkBubble(SKCanvas canvas, float h, float a)
     {
-        float x = 0.30f * h;
-        float y = -0.92f * h;
+        // Floats up and to the right, clear of the body top (-0.90h).
+        float x = 0.42f * h;
+        float y = -1.12f * h;
         byte alpha = (byte)(235 * a);
+
         _fill.Color = new SKColor(255, 255, 255, alpha);
-        canvas.DrawCircle(x, y, 0.10f * h, _fill);
-        canvas.DrawCircle(x - (0.13f * h), y + (0.10f * h), 0.045f * h, _fill);
-        canvas.DrawCircle(x - (0.20f * h), y + (0.17f * h), 0.028f * h, _fill);
+        canvas.DrawCircle(x, y, 0.12f * h, _fill);
+        canvas.DrawCircle(x - (0.16f * h), y + (0.13f * h), 0.05f * h, _fill);
+        canvas.DrawCircle(x - (0.24f * h), y + (0.2f * h), 0.03f * h, _fill);
         _fill.Color = new SKColor(0x6B, 0x5B, 0x52, alpha);
         for (int i = -1; i <= 1; i++)
         {
-            canvas.DrawCircle(x + (i * 0.04f * h), y, 0.014f * h, _fill);
+            canvas.DrawCircle(x + (i * 0.045f * h), y, 0.016f * h, _fill);
         }
     }
 
     private void DrawUmbrella(SKCanvas canvas, float h, float a, SkinPalette palette)
     {
-        float topY = -1.02f * h;
-        float r = 0.30f * h;
+        float topY = -1.12f * h;
+        float r = 0.34f * h;
         byte alpha = (byte)(255 * a);
+
         _stroke.Color = new SKColor(0x6B, 0x5B, 0x52, alpha);
-        _stroke.StrokeWidth = h * 0.02f;
-        canvas.DrawLine(0, topY, 0, -0.7f * h, _stroke);
+        _stroke.StrokeWidth = h * 0.022f;
+        canvas.DrawLine(0, topY, 0, -0.55f * h, _stroke); // shaft, held in front
+
         _fill.Color = palette.Accent.ToSk(a);
         using var dome = new SKPath();
         dome.MoveTo(-r, topY);
-        dome.QuadTo(0, topY - (0.28f * h), r, topY);
+        dome.QuadTo(0, topY - (0.3f * h), r, topY);
+        // Scalloped underside for a little charm.
+        dome.QuadTo(r * 0.5f, topY + (0.05f * h), 0, topY);
+        dome.QuadTo(-r * 0.5f, topY + (0.05f * h), -r, topY);
         dome.Close();
         canvas.DrawPath(dome, _fill);
+
+        _fill.Color = palette.BodyShadow.ToSk(a * 0.5f);
+        canvas.DrawCircle(0, topY, r * 0.06f, _fill); // ferrule
     }
 }

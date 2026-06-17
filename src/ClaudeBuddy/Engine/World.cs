@@ -30,6 +30,9 @@ public sealed class World
 
     public float RightWall => VirtualBounds.Right;
 
+    /// <summary>The Y coordinate (physical px) of the top edge the crab can hang from.</summary>
+    public float CeilingY => VirtualBounds.Top;
+
     public WeatherKind Weather { get; set; } = WeatherKind.Clear;
 
     public World() => Refresh();

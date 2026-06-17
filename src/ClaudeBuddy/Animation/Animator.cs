@@ -23,6 +23,12 @@ public sealed class Animator
     private float _blinkTimer;
     private float _blinkProgress = 1f; // 1 = fully open
     private bool _blinking;
+    private float _typingIntensity; // 0..1, how fast the user is currently typing
+
+    // Springy squash/stretch — gives landings and pose changes a little organic
+    // overshoot instead of an easing-only "glide" that can feel mechanical.
+    private Spring _scaleX = new(1f);
+    private Spring _scaleY = new(1f);
 
     public Animator(Rng rng)
     {
@@ -32,6 +38,12 @@ public sealed class Animator
 
     /// <summary>The blended pose to draw this frame.</summary>
     public Pose Current => _current;
+
+    /// <summary>
+    /// Feeds the current typing rate (0 = idle, 1 = furious) so the <c>TypeAlong</c>
+    /// pose can tap faster and bounce harder the quicker the user types.
+    /// </summary>
+    public void SetTypingIntensity(float intensity) => _typingIntensity = MathUtil.Clamp01(intensity);
 
     /// <summary>
     /// Advances the animator. <paramref name="lookX"/>/<paramref name="lookY"/> are the
@@ -54,13 +66,18 @@ public sealed class Animator
         BuildTarget(mascot.Animation, emotion, lookX, lookY);
         ApplyMoodFace(mascot.Animation, emotion);
         ApplyBlink(dt, mascot.Animation);
-        ApplyBreathing(mascot.Animation);
+        ApplyIdleLife(mascot.Animation);
 
         Blend(dt);
     }
 
     /// <summary>Resets the blend so a hard cut (e.g. Photo Mode pose) snaps instantly.</summary>
-    public void Snap() => _current.CopyFrom(_target);
+    public void Snap()
+    {
+        _current.CopyFrom(_target);
+        _scaleX = new Spring(_target.BodyScaleX);
+        _scaleY = new Spring(_target.BodyScaleY);
+    }
 
     // -- Target synthesis ---------------------------------------------------
 
@@ -204,31 +221,54 @@ public sealed class Animator
                 break;
 
             case AnimationState.Think:
-                t.ArmRight = 1.5f;
-                t.HeadTilt = -0.12f;
-                t.EyeLookX = 0.5f;
-                t.EyeLookY = -0.6f;
+            {
+                // Bubble eases in, the chin "finger" taps, and the gaze drifts around
+                // as if chasing an idea — never a frozen hold.
+                float appear = Easing.OutCubic(MathUtil.Clamp01(_stateTime / 0.5f));
+                t.ArmRight = 1.5f + (0.1f * MathF.Sin(_stateTime * 6f));
+                t.HeadTilt = -0.1f + (0.06f * MathF.Sin(_stateTime * 0.8f));
+                t.EyeLookX = 0.35f + (0.35f * MathF.Sin(_stateTime * 0.7f));
+                t.EyeLookY = -0.55f + (0.1f * MathF.Sin(_stateTime * 1.3f));
                 t.MouthCurve = 0.05f;
                 t.BrowAngle = 0.2f;
-                t.ThinkBubble = 1f;
+                t.ThinkBubble = appear;
                 break;
+            }
 
             case AnimationState.Read:
+            {
+                // Eyes scan left-right across the page, the head bobs gently, and a
+                // little page-turn flick happens every few seconds.
+                float appear = Easing.OutCubic(MathUtil.Clamp01(_stateTime / 0.6f));
+                float pageCycle = _stateTime % 4f;
+                float turn = pageCycle < 0.35f ? Easing.OutQuad(pageCycle / 0.35f) * (1f - (pageCycle / 0.35f)) * 4f : 0f;
                 t.BodyOffset = new Vector2(0f, 8f);
-                t.BodyScaleY = 0.92f;
+                t.BodyScaleY = 0.94f;
+                t.EyeLookX = MathF.Sin(_stateTime * 1.6f) * 0.5f;
                 t.EyeLookY = 0.7f;
-                t.ArmLeft = 0.9f;
-                t.ArmRight = 0.9f;
+                t.HeadTilt = 0.05f + (0.03f * MathF.Sin(_stateTime * 0.5f));
+                t.ArmLeft = 0.9f * appear;
+                t.ArmRight = (0.9f + (0.5f * turn)) * appear;
                 t.MouthCurve = 0.2f;
-                t.BookProp = 1f;
+                t.BookProp = appear;
                 break;
+            }
 
             case AnimationState.Drink:
-                t.ArmRight = 1.7f;
-                t.HeadTilt = -0.08f;
-                t.MouthOpen = 0.18f;
-                t.CoffeeProp = 1f;
+            {
+                // Reach the cup up, then take slow repeated sips: head dips, eyes
+                // half-close and the mouth opens in rhythm.
+                float reach = Easing.OutCubic(MathUtil.Clamp01(_stateTime / 0.7f));
+                float sip = 0.5f + (0.5f * MathF.Sin(_stateTime * 2.2f));
+                t.ArmRight = (1.3f + (0.3f * sip)) * reach;
+                t.HeadTilt = (-0.04f - (0.06f * sip)) * reach;
+                t.MouthOpen = 0.05f + (0.13f * sip * reach);
+                t.EyeOpen = 1f - (0.3f * sip * reach);
+                t.EyeLookY = 0.2f * reach;
+                t.MouthCurve = 0.3f;
+                t.CoffeeProp = reach;
                 break;
+            }
 
             case AnimationState.Stretch:
                 float s = Easing.InOutSine(MathUtil.PingPong(_stateTime, 1.2f) / 1.2f);
@@ -341,6 +381,123 @@ public sealed class Animator
                 t.BrowAngle = -0.5f;
                 t.BodyScaleY = 0.95f;
                 break;
+
+            case AnimationState.TypeAlong:
+            {
+                // "Playing piano": the four legs rise and fall in a slow, pronounced
+                // rolling sequence (each is a quarter-cycle behind the last). Faster
+                // typing only nudges the tempo so the keystrokes stay clearly readable.
+                float keys = _stateTime * (5f + (3.5f * _typingIntensity));
+                t.LegPhase = keys;
+                t.StrideAmount = 1.5f + (0.5f * _typingIntensity); // big, notorious lift
+                t.BodyOffset = new Vector2(0f, 2f - (MathF.Abs(MathF.Sin(keys * 0.5f)) * 1.5f));
+                t.BodyScaleY = 0.97f;
+                t.BodyLean = 0.05f;
+                t.HeadTilt = 0.05f + (MathF.Sin(keys * 0.5f) * 0.05f); // slow head sway in time
+                t.EyeOpen = 0.95f;
+                t.EyeLookY = 0.35f;          // peeking down at the keys
+                t.MouthCurve = 0.5f;
+                t.MouthOpen = 0.04f + (0.08f * _typingIntensity);
+                t.BrowAngle = 0.3f;
+                break;
+            }
+
+            case AnimationState.Charge:
+            {
+                const float buildTime = 0.7f;
+                if (_stateTime < buildTime)
+                {
+                    // Anticipation: crouch low and vibrate, eyes turning to stars.
+                    float build = MathUtil.Clamp01(_stateTime / buildTime);
+                    t.BodyScaleY = 1f - (0.2f * build);
+                    t.BodyScaleX = 1f + (0.16f * build);
+                    t.BodyOffset = new Vector2(MathF.Sin(_stateTime * 42f) * 2.2f * build, 4f * build);
+                    t.BrowAngle = 0.6f;
+                    t.MouthOpen = 0.25f * build;
+                    t.StarEyes = build;
+                    t.EyeOpen = 1.1f;
+                }
+                else
+                {
+                    // Release: spring up tall with a huge grin and star eyes.
+                    float rel = MathUtil.Clamp01((_stateTime - buildTime) / 0.4f);
+                    t.BodyScaleY = 1f + (0.3f * (1f - rel));
+                    t.BodyScaleX = 1f - (0.18f * (1f - rel));
+                    t.BodyOffset = new Vector2(0f, -10f * (1f - rel));
+                    t.ArmLeft = 2.5f;
+                    t.ArmRight = 2.5f;
+                    t.MouthOpen = 0.6f;
+                    t.MouthCurve = 1f;
+                    t.StarEyes = 1f;
+                }
+
+                break;
+            }
+
+            case AnimationState.Climb:
+            {
+                // Quick scrabbling legs + a determined little face. The whole body is
+                // rotated onto the wall/ceiling by the renderer; here it just climbs.
+                float scrabble = _stateTime * 12f;
+                t.LegPhase = scrabble;
+                t.StrideAmount = 1.1f;
+                t.BodyOffset = new Vector2(MathF.Sin(scrabble * 2f) * 1.4f, 0f);
+                t.HeadTilt = 0.05f;
+                t.EyeOpen = 1.05f;
+                t.BrowAngle = 0.35f;
+                t.MouthOpen = 0.12f;
+                t.MouthCurve = 0.2f;
+                break;
+            }
+
+            case AnimationState.Groom:
+            {
+                // Preening: a few unhurried head-tilts left/right with a tidy little
+                // raise of a "hand" (outer leg) as if smoothing itself / adjusting a hat.
+                float beat = _stateTime * 1.6f;
+                t.HeadTilt = MathF.Sin(beat) * 0.16f;
+                t.BodyLean = MathF.Sin(beat) * 0.05f;
+                t.BodyOffset = new Vector2(0f, MathF.Abs(MathF.Sin(beat * 2f)) * -1.5f);
+                // Alternate which side reaches up so it preens both sides.
+                bool rightTurn = MathF.Sin(beat) >= 0f;
+                t.ArmRight = rightTurn ? 1.9f + (0.25f * MathF.Sin(_stateTime * 9f)) : 0f;
+                t.ArmLeft = rightTurn ? 0f : 1.9f + (0.25f * MathF.Sin(_stateTime * 9f));
+                t.EyeOpen = 0.9f;
+                t.MouthCurve = 0.4f;
+                t.Blush = 0.15f;
+                break;
+            }
+
+            case AnimationState.TapFoot:
+            {
+                // Standing about, one foot tapping a steady beat — gentle impatience.
+                // Only the inner-right leg taps; the rest stay planted (StrideAmount 0).
+                float tap = MathF.Max(0f, MathF.Sin(_stateTime * 9f));
+                t.LegPhase = MathUtil.HalfPi;       // freeze the rolling walk cycle
+                t.StrideAmount = 0f;
+                t.ArmRight = 0f;
+                // Drive the tap through a tiny vertical body bob synced to the beat.
+                t.BodyOffset = new Vector2(0f, tap * -1.2f);
+                t.HeadTilt = MathF.Sin(_stateTime * 1.2f) * 0.08f;
+                t.EyeLookX = MathF.Sin(_stateTime * 0.9f) * 0.4f;
+                t.EyeOpen = 1f;
+                t.MouthCurve = 0.25f;
+                break;
+            }
+
+            case AnimationState.Wiggle:
+            {
+                // A small, happy side-to-side sway in place — a "mini dance" that's
+                // calmer than the full Dance, good as a frequent idle.
+                float w = _stateTime * 5f;
+                t.BodyOffset = new Vector2(MathF.Sin(w) * 4f, MathF.Abs(MathF.Sin(w * 2f)) * -2f);
+                t.BodyLean = MathF.Sin(w) * 0.12f;
+                t.HeadTilt = MathF.Sin(w) * 0.12f;
+                t.MouthCurve = 0.7f;
+                t.HappyEyes = 0.6f;
+                t.Blush = 0.1f;
+                break;
+            }
         }
     }
 
@@ -461,17 +618,30 @@ public sealed class Animator
         }
     }
 
-    private void ApplyBreathing(AnimationState state)
+    private void ApplyIdleLife(AnimationState state)
     {
-        if (state is not (AnimationState.Idle or AnimationState.Stand or AnimationState.Sit))
+        // Layered onto otherwise-calm states so the mascot is *always* subtly moving:
+        // breathing, a slow weight shift, a tiny head sway and a wandering glance.
+        bool calm = state is AnimationState.Idle or AnimationState.Stand or AnimationState.Sit
+            or AnimationState.LookAround or AnimationState.LookUp or AnimationState.LookDown;
+
+        if (!calm)
         {
             return;
         }
 
         float breath = MathF.Sin(_phase * 1.7f);
-        _target.BodyScaleY *= 1f + (breath * 0.018f);
-        _target.BodyScaleX *= 1f - (breath * 0.012f);
-        _target.BodyOffset = _target.BodyOffset.WithY(_target.BodyOffset.Y + (breath * 1.4f));
+        _target.BodyScaleY *= 1f + (breath * 0.02f);
+        _target.BodyScaleX *= 1f - (breath * 0.013f);
+        _target.BodyOffset = _target.BodyOffset.WithY(_target.BodyOffset.Y + (breath * 1.5f));
+
+        // Slow weight shift from foot to foot + a matching micro head tilt.
+        float sway = MathF.Sin(_phase * 0.6f);
+        _target.BodyOffset = _target.BodyOffset.WithX(_target.BodyOffset.X + (sway * 1.8f));
+        _target.HeadTilt += sway * 0.03f;
+
+        // An occasional idle glance so the eyes never lock dead-ahead.
+        _target.EyeLookX += MathF.Sin(_phase * 0.33f) * 0.12f;
     }
 
     private void Blend(float dt)
@@ -479,30 +649,36 @@ public sealed class Animator
         Pose c = _current;
         Pose t = _target;
 
-        c.BodyOffset = MathUtil.Damp(c.BodyOffset, t.BodyOffset, 16f, dt);
-        c.BodyLean = MathUtil.Damp(c.BodyLean, t.BodyLean, 14f, dt);
+        c.BodyOffset = MathUtil.Damp(c.BodyOffset, t.BodyOffset, 15f, dt);
+        c.BodyLean = MathUtil.Damp(c.BodyLean, t.BodyLean, 12f, dt);
         c.WholeBodyRotation = t.WholeBodyRotation; // rotations are driven directly
-        c.BodyScaleX = MathUtil.Damp(c.BodyScaleX, t.BodyScaleX, 16f, dt);
-        c.BodyScaleY = MathUtil.Damp(c.BodyScaleY, t.BodyScaleY, 16f, dt);
-        c.HeadTilt = MathUtil.Damp(c.HeadTilt, t.HeadTilt, 14f, dt);
+
+        // Squash & stretch springs slightly past the target then settle — the bit of
+        // overshoot reads as soft, weighty, organic motion (Apple/Pixar feel).
+        _scaleX.Step(t.BodyScaleX, 240f, 22f, dt);
+        _scaleY.Step(t.BodyScaleY, 240f, 22f, dt);
+        c.BodyScaleX = _scaleX.Value;
+        c.BodyScaleY = _scaleY.Value;
+
+        c.HeadTilt = MathUtil.Damp(c.HeadTilt, t.HeadTilt, 12f, dt);
         c.EyeOpen = MathUtil.Damp(c.EyeOpen, t.EyeOpen, 26f, dt);
-        c.EyeLookX = MathUtil.Damp(c.EyeLookX, t.EyeLookX, 12f, dt);
-        c.EyeLookY = MathUtil.Damp(c.EyeLookY, t.EyeLookY, 12f, dt);
-        c.MouthOpen = MathUtil.Damp(c.MouthOpen, t.MouthOpen, 18f, dt);
-        c.MouthCurve = MathUtil.Damp(c.MouthCurve, t.MouthCurve, 14f, dt);
-        c.BrowAngle = MathUtil.Damp(c.BrowAngle, t.BrowAngle, 14f, dt);
+        c.EyeLookX = MathUtil.Damp(c.EyeLookX, t.EyeLookX, 11f, dt);
+        c.EyeLookY = MathUtil.Damp(c.EyeLookY, t.EyeLookY, 11f, dt);
+        c.MouthOpen = MathUtil.Damp(c.MouthOpen, t.MouthOpen, 17f, dt);
+        c.MouthCurve = MathUtil.Damp(c.MouthCurve, t.MouthCurve, 10f, dt);
+        c.BrowAngle = MathUtil.Damp(c.BrowAngle, t.BrowAngle, 11f, dt);
         c.Blush = MathUtil.Damp(c.Blush, t.Blush, 10f, dt);
-        c.ArmLeft = MathUtil.Damp(c.ArmLeft, t.ArmLeft, 16f, dt);
-        c.ArmRight = MathUtil.Damp(c.ArmRight, t.ArmRight, 16f, dt);
+        c.ArmLeft = MathUtil.Damp(c.ArmLeft, t.ArmLeft, 15f, dt);
+        c.ArmRight = MathUtil.Damp(c.ArmRight, t.ArmRight, 15f, dt);
         c.LegPhase = t.LegPhase; // cyclic, set directly
-        c.StrideAmount = MathUtil.Damp(c.StrideAmount, t.StrideAmount, 14f, dt);
-        c.HappyEyes = MathUtil.Damp(c.HappyEyes, t.HappyEyes, 18f, dt);
-        c.StarEyes = MathUtil.Damp(c.StarEyes, t.StarEyes, 14f, dt);
+        c.StrideAmount = MathUtil.Damp(c.StrideAmount, t.StrideAmount, 13f, dt);
+        c.HappyEyes = MathUtil.Damp(c.HappyEyes, t.HappyEyes, 16f, dt);
+        c.StarEyes = MathUtil.Damp(c.StarEyes, t.StarEyes, 13f, dt);
         c.Alpha = MathUtil.Damp(c.Alpha, t.Alpha, 10f, dt);
-        c.CoffeeProp = MathUtil.Damp(c.CoffeeProp, t.CoffeeProp, 12f, dt);
-        c.UmbrellaProp = MathUtil.Damp(c.UmbrellaProp, t.UmbrellaProp, 12f, dt);
-        c.BookProp = MathUtil.Damp(c.BookProp, t.BookProp, 12f, dt);
-        c.ThinkBubble = MathUtil.Damp(c.ThinkBubble, t.ThinkBubble, 12f, dt);
+        c.CoffeeProp = MathUtil.Damp(c.CoffeeProp, t.CoffeeProp, 9f, dt);
+        c.UmbrellaProp = MathUtil.Damp(c.UmbrellaProp, t.UmbrellaProp, 9f, dt);
+        c.BookProp = MathUtil.Damp(c.BookProp, t.BookProp, 9f, dt);
+        c.ThinkBubble = MathUtil.Damp(c.ThinkBubble, t.ThinkBubble, 9f, dt);
         c.SleepBubble = MathUtil.Damp(c.SleepBubble, t.SleepBubble, 8f, dt);
     }
 }

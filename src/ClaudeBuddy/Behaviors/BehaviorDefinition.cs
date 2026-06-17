@@ -67,6 +67,13 @@ public sealed record BehaviorDefinition
     /// <summary>Optional one-shot particle burst when the behaviour starts.</summary>
     public ParticleKind? EnterParticle { get; init; }
 
+    /// <summary>
+    /// Optional particle burst fired once, partway through the behaviour (its "climax")
+    /// — used by build-up moves like the power-up charge so the explosion lands on the
+    /// release rather than at the start.
+    /// </summary>
+    public ParticleKind? ClimaxParticle { get; init; }
+
     /// <summary>Optional sound key (resolved by the audio service) on entry.</summary>
     public string? EnterSound { get; init; }
 }

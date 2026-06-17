@@ -28,6 +28,14 @@ public sealed class PhysicsSystem
             return;
         }
 
+        if (mascot.Climbing)
+        {
+            // Clinging to a wall/ceiling: the climb behaviour owns the position and
+            // there is no gravity. Just keep easing the squash back out.
+            mascot.RelaxSquash(dt);
+            return;
+        }
+
         float groundY = world.GroundY;
         Vector2 pos = mascot.Position;
         Vector2 vel = mascot.Velocity;
@@ -85,6 +93,20 @@ public sealed class PhysicsSystem
         else if (pos.Y < groundY - 1f)
         {
             mascot.OnGround = false;
+        }
+
+        // ---- Ceiling -----------------------------------------------------
+        // Without this a hard upward throw would sail off the top of the screen forever.
+        // Keep the whole body on-screen and give it a little boing off the top.
+        float headRoom = mascot.HeightPx(world.DpiScale) * 0.95f;
+        float ceiling = world.CeilingY + headRoom;
+        if (pos.Y < ceiling)
+        {
+            pos = pos.WithY(ceiling);
+            if (vel.Y < 0f)
+            {
+                vel = vel.WithY(-vel.Y * EngineConstants.Bounciness);
+            }
         }
 
         // ---- Side walls --------------------------------------------------

@@ -22,6 +22,32 @@ public sealed class Mascot
 
     public bool BeingDragged { get; set; }
 
+    /// <summary>Which screen edge the crab is clinging to (Floor = normal gravity).</summary>
+    public Surface Surface { get; set; } = Surface.Floor;
+
+    /// <summary>True while clinging to a wall or the ceiling (gravity is suspended).</summary>
+    public bool Climbing => Surface != Surface.Floor;
+
+    /// <summary>
+    /// Base whole-body rotation (radians) for the current surface so the crab's feet
+    /// always point at the surface: upright on the floor, sideways on a wall, upside
+    /// down on the ceiling. The renderer eases toward this so transitions are smooth.
+    /// </summary>
+    public float SurfaceAngle => Surface switch
+    {
+        Surface.LeftWall => MathUtil.HalfPi,    // body points right, feet on the left wall
+        Surface.RightWall => -MathUtil.HalfPi,   // body points left, feet on the right wall
+        Surface.Ceiling => MathF.PI,             // upside down
+        _ => 0f,
+    };
+
+    /// <summary>
+    /// When set, the renderer uses this exact body rotation (radians) instead of easing
+    /// toward <see cref="SurfaceAngle"/>. The climb uses it to drive a full 360° flip
+    /// while hopping from one surface to another.
+    /// </summary>
+    public float? RenderAngleOverride { get; set; }
+
     /// <summary>User scale multiplier (DPI is applied separately by the renderer).</summary>
     public float Scale { get; set; } = 1.0f;
 

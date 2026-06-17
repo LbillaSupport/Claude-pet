@@ -8,6 +8,33 @@ public enum Facing
 }
 
 /// <summary>
+/// The body/face archetype the artist draws. Most skins are just recolours of the
+/// classic block (<see cref="Claud"/>); a few change the silhouette — the Creeper's
+/// signature face, the Ghast's tentacles and sad eyes, or Nicolaia's top hat, suit and
+/// side-curls dressed over the classic block.
+/// </summary>
+public enum SkinStyle
+{
+    Claud,
+    Creeper,
+    Ghast,
+    Nicolaia,
+}
+
+/// <summary>
+/// Which screen edge the (crab-like) mascot is currently clinging to. Determines the
+/// whole-body orientation: on a wall it turns sideways, on the ceiling it hangs upside
+/// down. <see cref="Floor"/> is the normal, upright, gravity-bound state.
+/// </summary>
+public enum Surface
+{
+    Floor,
+    LeftWall,
+    RightWall,
+    Ceiling,
+}
+
+/// <summary>
 /// Phases of the simulated day. The <see cref="Routine.DailyRoutine"/> maps the
 /// real wall-clock time onto one of these to colour the mascot's behaviour.
 /// </summary>
@@ -79,6 +106,24 @@ public enum AnimationState
     Trip,
     Happy,
     Sad,
+
+    /// <summary>Hunched forward, tapping along while the user types at the keyboard.</summary>
+    TypeAlong,
+
+    /// <summary>Scrabbling up a wall / across the ceiling (orientation set by Surface).</summary>
+    Climb,
+
+    /// <summary>Anticipation crouch + shake, then an explosive release (power-up).</summary>
+    Charge,
+
+    /// <summary>Preening: little head-tilts and a tidy-up wiggle (e.g. adjusting a hat).</summary>
+    Groom,
+
+    /// <summary>Idle impatience: a foot taps a steady beat while standing.</summary>
+    TapFoot,
+
+    /// <summary>A small, happy in-place wiggle/sway — gentler than a full dance.</summary>
+    Wiggle,
 }
 
 /// <summary>The visual primitive a particle is rendered as.</summary>
@@ -120,6 +165,7 @@ public enum MenuCommand
     BehaviorFrequency,
     ToggleAlwaysOnTop,
     ToggleLaunchOnStartup,
+    ToggleBattery,
     ResetPosition,
     PhotoMode,
     Achievements,

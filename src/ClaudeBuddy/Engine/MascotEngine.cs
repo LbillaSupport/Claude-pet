@@ -40,6 +40,9 @@ public sealed class MascotEngine
     private readonly ParticleRenderer _particleRenderer;
     private readonly CharacterArtist _artist;
     private readonly CursorTracker _cursor;
+    private readonly KeyboardActivityTracker _keyboard;
+    private readonly SessionUsageService _usage;
+    private readonly UsageHudRenderer _hud;
     private readonly SkinManager _skins;
     private readonly ModManager _mods;
     private readonly IClaudeLauncher _claude;
@@ -70,6 +73,25 @@ public sealed class MascotEngine
     private float _saveAcc;
     private float _weatherTimer = 30f;
     private float _weatherEmitAcc;
+    private int _typeNoteAcc;
+    private float _renderSurfaceAngle; // smoothed orientation for wall/ceiling clinging
+
+    // Session "battery" + speech-bubble state.
+    private string _bubble = string.Empty;
+    private float _bubbleRemaining;
+    private float _bubbleElapsed;
+    private int _lastWindowId;
+    private int _lastChargeBucket = -1;
+    private bool _usageInitialised;
+    private float _phraseCooldown = 25f;
+    private float _usageMoodAcc;
+    private float _renewedFlash;
+
+    // Short reactions and mid-air moves that "type along" must not interrupt.
+    private static readonly HashSet<string> TypingNonInterruptible = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pet", "surprised", "scared", "claude-celebrate", "wave-goodbye", "greet", "trip", "jump", "climb",
+    };
 
     private AppSettings S => _settings.Current;
 
@@ -78,7 +100,9 @@ public sealed class MascotEngine
         PhysicsSystem physics, BehaviorController behavior, BehaviorCatalog catalog,
         EmotionState emotion, DailyRoutine routine, ParticleSystem particles,
         ParticleRenderer particleRenderer, CharacterArtist artist, CursorTracker cursor,
-        SkinManager skins, ModManager mods, IClaudeLauncher claude, IStartupService startup,
+        KeyboardActivityTracker keyboard, SessionUsageService usage, UsageHudRenderer hud,
+        SkinManager skins, ModManager mods,
+        IClaudeLauncher claude, IStartupService startup,
         IAudioService audio, AchievementService achievements, ContextMenu menu, Rng rng, GameTime time)
     {
         _settings = settings;
@@ -94,6 +118,9 @@ public sealed class MascotEngine
         _particleRenderer = particleRenderer;
         _artist = artist;
         _cursor = cursor;
+        _keyboard = keyboard;
+        _usage = usage;
+        _hud = hud;
         _skins = skins;
         _mods = mods;
         _claude = claude;
@@ -129,6 +156,7 @@ public sealed class MascotEngine
         _window.RightButtonUp += OnRightUp;
         _window.DisplayChanged += OnDisplayChanged;
         _behavior.BehaviorStarted += OnBehaviorStarted;
+        _behavior.BehaviorClimax += OnBehaviorClimax;
         _physics.Landed += OnLanded;
         _achievements.Unlocked += OnAchievementUnlocked;
 
@@ -136,6 +164,18 @@ public sealed class MascotEngine
         _startup.SetEnabled(S.LaunchOnStartup); // keep registry in sync with settings
         _claudeWasRunning = _claude.IsClaudeRunning();
         _doubleClickSeconds = NativeMethods.GetDoubleClickTime() / 1000.0;
+
+        // React to the keyboard (opt-out via settings). The hook only counts keystrokes.
+        if (S.KeyboardReactions)
+        {
+            _keyboard.Start();
+        }
+
+        // Read the session usage "battery" (opt-out via settings). Reads local logs only.
+        if (S.ShowBattery)
+        {
+            _usage.Start();
+        }
 
         // First hello.
         Trigger("greet");
@@ -148,12 +188,25 @@ public sealed class MascotEngine
         float dpi = _window.DpiScale;
 
         _cursor.Update(dt);
+        _keyboard.Update(dt);
+        _animator.SetTypingIntensity(_keyboard.Intensity);
+        UpdateUsageReactions(dt);
         RoutineProfile routine = _routine.Evaluate();
 
         // --- Interaction timing -----------------------------------------
         if (_leftPressed)
         {
-            UpdateDrag(dpi);
+            // Safety net: if the physical button is no longer down but we never got the
+            // WM_LBUTTONUP (capture lost, message swallowed by another window, …), release
+            // it ourselves so the mascot can never stay "glued" to the cursor.
+            if (!IsLeftMouseButtonDown())
+            {
+                OnLeftUp(0, 0);
+            }
+            else
+            {
+                UpdateDrag(dpi);
+            }
         }
 
         if (_pendingClick && (_time.Total - _pendingClickTime) > _doubleClickSeconds)
@@ -177,6 +230,7 @@ public sealed class MascotEngine
         {
             _behavior.Update(_mascot, _world, _emotion, routine, _cursor.Position, dt, S.BehaviorFrequency);
             _physics.Step(_mascot, _world, dt, _behavior.ControlsLocomotion);
+            UpdateTypingReaction();
         }
 
         _emotion.Update(dt, routine);
@@ -213,6 +267,8 @@ public sealed class MascotEngine
 
     public void Shutdown()
     {
+        _keyboard.Stop();
+        _usage.Stop();
         PersistAndSave();
     }
 
@@ -234,12 +290,71 @@ public sealed class MascotEngine
         var feet = new SKPoint(_mascot.Position.X - winX, _mascot.Position.Y - winY);
         var windowTopLeft = new Vector2(winX, winY);
 
+        // During a corner hop the climb drives the rotation directly (for the 360° flip);
+        // otherwise ease toward the resting orientation for the current surface.
+        if (_mascot.RenderAngleOverride is float forced)
+        {
+            _renderSurfaceAngle = forced;
+        }
+        else
+        {
+            _renderSurfaceAngle = MathUtil.DampAngle(_renderSurfaceAngle, _mascot.SurfaceAngle, 8f, _time.Delta);
+        }
+        bool rotated = MathF.Abs(_renderSurfaceAngle) > 1e-3f;
+
         _renderer.Render(_window.Handle, winX, winY, 255, canvas2D =>
         {
+            if (rotated)
+            {
+                canvas2D.Save();
+                canvas2D.Translate(feet.X, feet.Y);
+                canvas2D.RotateRadians(_renderSurfaceAngle); // pivot about the contact point
+                canvas2D.Translate(-feet.X, -feet.Y);
+            }
+
             _artist.Draw(canvas2D, feet, groundCanvasY, height, _mascot.Facing,
                 _mascot.SquashX, _mascot.SquashY, _animator.Current, _skins.Current.Palette, dpi);
+
+            if (rotated)
+            {
+                canvas2D.Restore();
+            }
+
+            // Particles live in world space, so they are drawn after the body un-rotated.
             _particleRenderer.Draw(canvas2D, _particles.Active, windowTopLeft, dpi);
+
+            // Battery + speech bubble float just past the head, always screen-upright.
+            DrawUsageHud(canvas2D, feet, height, dpi, canvas);
         });
+    }
+
+    private void DrawUsageHud(SKCanvas canvas2D, SKPoint feet, float height, float dpi, int canvasSize)
+    {
+        if (!S.ShowBattery)
+        {
+            return;
+        }
+
+        UsageSnapshot u = _usage.Current;
+        // Only show the battery when a Claude session is actually live.
+        bool showBattery = u.Available && u.HasActiveSession;
+
+        // Place it just beyond the head along the body's current "up" direction so it
+        // tracks the crab onto walls/ceilings without ever clipping off-screen. The
+        // headroom is per-skin so tall headgear (Nicolaia's top hat) pushes it higher.
+        float ang = _renderSurfaceAngle;
+        float headroom = _skins.Current.Palette.HudHeadroom;
+        var up = new SKPoint(MathF.Sin(ang), -MathF.Cos(ang));
+        var head = new SKPoint(feet.X + (up.X * headroom * height), feet.Y + (up.Y * headroom * height));
+
+        if (showBattery)
+        {
+            float pulse = u.Remaining < 0.22f ? (0.5f + (0.5f * MathF.Sin((float)_time.Total * 6f))) : 0f;
+            _hud.DrawBattery(canvas2D, head, dpi, u.Remaining, _renewedFlash > 0f, pulse);
+        }
+
+        var tail = new SKPoint(head.X, head.Y - (15f * dpi));
+        _hud.DrawBubble(canvas2D, tail, dpi, _bubble, BubbleAlpha(), canvasSize);
     }
 
     // ===================================================================
@@ -289,7 +404,19 @@ public sealed class MascotEngine
 
     private void OnRightUp(int x, int y)
     {
-        MenuSelection selection = _menu.Show(_window.Handle, x, y, BuildMenuState());
+        // The menu's modal loop blocks RunLoop, so a timer keeps frames ticking while
+        // it's open — otherwise the mascot freezes until the menu closes.
+        _window.BeginModalTicks();
+        MenuSelection selection;
+        try
+        {
+            selection = _menu.Show(_window.Handle, x, y, BuildMenuState());
+        }
+        finally
+        {
+            _window.EndModalTicks();
+        }
+
         HandleMenu(selection);
     }
 
@@ -299,6 +426,9 @@ public sealed class MascotEngine
         _world.SetDpiScale(_window.DpiScale);
     }
 
+    private static bool IsLeftMouseButtonDown() =>
+        (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LBUTTON) & 0x8000) != 0;
+
     private void UpdateDrag(float dpi)
     {
         Vector2 cur = _cursor.Position;
@@ -307,6 +437,8 @@ public sealed class MascotEngine
         {
             _dragging = true;
             _mascot.BeingDragged = true;
+            _mascot.Surface = Surface.Floor; // peeled off the wall when grabbed
+            _mascot.RenderAngleOverride = null;
             _pendingClick = false;
             _emotion.Nudge(Mood.Surprised, 0.7f);
         }
@@ -328,6 +460,186 @@ public sealed class MascotEngine
     // ===================================================================
     //  Interactions
     // ===================================================================
+
+    private void UpdateTypingReaction()
+    {
+        if (!_keyboard.IsTyping)
+        {
+            return;
+        }
+
+        // Perk up and "type along" while you work, but never stomp on a short, important
+        // reaction (petting, a scare, celebrating Claude…) or an acrobatic mid-air move.
+        bool canSwitch = _mascot.OnGround && !TypingNonInterruptible.Contains(_behavior.Current.Id);
+        if (canSwitch && !_behavior.IsRunning("type-along"))
+        {
+            Trigger("type-along");
+        }
+
+        // A few little notes drift up every so often as it watches you.
+        _typeNoteAcc += _keyboard.NewKeystrokes;
+        if (_typeNoteAcc >= 8)
+        {
+            _typeNoteAcc = 0;
+            _particles.EmitSparkles(HeadWorld(), 2);
+        }
+    }
+
+    // ---- Session "battery" reactions ------------------------------------
+
+    private static readonly string[] RenewedPhrases =
+        { "¡Sesión renovada!", "¡Recargado al 100%!", "¡Energía nueva, vamos!" };
+    private static readonly string[] FullPhrases =
+        { "¡A full de energía!", "¡Listo para programar!", "Batería llena :)" };
+    private static readonly string[] MidPhrases =
+        { "Rindiendo bien...", "Vamos a buen ritmo.", "Media sesión, todo ok." };
+    private static readonly string[] LowPhrases =
+        { "Uf, me voy cansando...", "Cuidá los tokens.", "Queda poca batería." };
+    private static readonly string[] CriticalPhrases =
+        { "Casi sin batería...", "Necesito recargar.", "Modo ahorro :(" };
+
+    private void UpdateUsageReactions(float dt)
+    {
+        if (_bubbleElapsed < _bubbleRemaining)
+        {
+            _bubbleElapsed += dt;
+        }
+
+        _renewedFlash = MathF.Max(0f, _renewedFlash - dt);
+
+        if (!S.ShowBattery)
+        {
+            return;
+        }
+
+        UsageSnapshot u = _usage.Current;
+        if (!u.Available)
+        {
+            return;
+        }
+
+        int bucket = ChargeBucket(u.Remaining);
+
+        if (!_usageInitialised)
+        {
+            // Seed baselines on the first real read so we don't "celebrate" at launch.
+            _usageInitialised = true;
+            _lastWindowId = u.WindowId;
+            _lastChargeBucket = bucket;
+            return;
+        }
+
+        bool canReact = !_photoMode && !_dragging;
+
+        // A brand-new 5-hour window started → recharged! Make a fuss.
+        if (u.WindowId != _lastWindowId)
+        {
+            _lastWindowId = u.WindowId;
+            _lastChargeBucket = bucket;
+            _renewedFlash = 3.5f;
+            ShowBubble(Pick(RenewedPhrases), 4.5f);
+            if (canReact)
+            {
+                Trigger("celebrate");
+                Vector2 head = HeadWorld();
+                _particles.EmitConfetti(head);
+                _particles.EmitStars(head, 12);
+                _particles.EmitMagic(head, 14);
+                _audio.Play("celebrate");
+                _emotion.Nudge(Mood.Excited, 1f, 2.5f);
+            }
+
+            return;
+        }
+
+        // No live session → no battery, so stay quiet about it.
+        if (!u.HasActiveSession)
+        {
+            _lastChargeBucket = bucket;
+            return;
+        }
+
+        // Crossed into a different charge level → comment on it.
+        if (bucket != _lastChargeBucket)
+        {
+            _lastChargeBucket = bucket;
+            ShowBubble(BucketPhrase(bucket, u), 4f);
+        }
+
+        // A draining battery makes the crab visibly sleepier/lazier.
+        _usageMoodAcc -= dt;
+        if (_usageMoodAcc <= 0f)
+        {
+            _usageMoodAcc = 8f;
+            if (u.Remaining < 0.18f)
+            {
+                _emotion.Nudge(Mood.Sleepy, 0.5f);
+            }
+            else if (u.Remaining < 0.4f)
+            {
+                _emotion.Nudge(Mood.Lazy, 0.3f);
+            }
+        }
+
+        // The odd spontaneous remark when nothing else is showing.
+        _phraseCooldown -= dt;
+        if (_phraseCooldown <= 0f)
+        {
+            _phraseCooldown = _rng.Range(70f, 130f);
+            if (_bubbleElapsed >= _bubbleRemaining)
+            {
+                ShowBubble(BucketPhrase(bucket, u), 3.5f);
+            }
+        }
+    }
+
+    private static int ChargeBucket(float remaining) =>
+        remaining > 0.66f ? 3 : (remaining > 0.33f ? 2 : (remaining > 0.12f ? 1 : 0));
+
+    private string BucketPhrase(int bucket, UsageSnapshot u)
+    {
+        // When low, sometimes show the actual reset countdown instead of a mood line.
+        if (bucket <= 1 && u.TimeUntilReset > TimeSpan.Zero && _rng.Chance(0.5f))
+        {
+            int mins = (int)Math.Ceiling(u.TimeUntilReset.TotalMinutes);
+            return mins >= 60 ? $"Vuelvo en {mins / 60}h {mins % 60}m" : $"Vuelvo en {mins}m";
+        }
+
+        return Pick(bucket switch
+        {
+            3 => FullPhrases,
+            2 => MidPhrases,
+            1 => LowPhrases,
+            _ => CriticalPhrases,
+        });
+    }
+
+    private string Pick(string[] options) => options[_rng.Range(0, options.Length)];
+
+    private void ShowBubble(string text, float duration)
+    {
+        _bubble = text;
+        _bubbleRemaining = duration;
+        _bubbleElapsed = 0f;
+    }
+
+    private float BubbleAlpha()
+    {
+        if (string.IsNullOrEmpty(_bubble) || _bubbleElapsed >= _bubbleRemaining)
+        {
+            return 0f;
+        }
+
+        const float fadeIn = 0.25f;
+        const float fadeOut = 0.5f;
+        if (_bubbleElapsed < fadeIn)
+        {
+            return Easing.OutQuad(_bubbleElapsed / fadeIn);
+        }
+
+        float remaining = _bubbleRemaining - _bubbleElapsed;
+        return remaining < fadeOut ? Easing.OutQuad(remaining / fadeOut) : 1f;
+    }
 
     private void Pet()
     {
@@ -395,6 +707,7 @@ public sealed class MascotEngine
             Muted = S.Muted,
             LaunchOnStartup = S.LaunchOnStartup,
             PhotoMode = _photoMode,
+            ShowBattery = S.ShowBattery,
             AnimationSpeed = S.AnimationSpeed,
             Volume = S.Volume,
             BehaviorFrequency = S.BehaviorFrequency,
@@ -435,6 +748,19 @@ public sealed class MascotEngine
             case MenuCommand.ToggleLaunchOnStartup:
                 S.LaunchOnStartup = !S.LaunchOnStartup;
                 _startup.SetEnabled(S.LaunchOnStartup);
+                break;
+            case MenuCommand.ToggleBattery:
+                S.ShowBattery = !S.ShowBattery;
+                if (S.ShowBattery)
+                {
+                    _usage.Start(); // begins reading local logs again
+                }
+                else
+                {
+                    _usage.Stop();
+                    _bubble = string.Empty; // clear any battery bubble immediately
+                }
+
                 break;
             case MenuCommand.ResetPosition:
                 ResetPosition();
@@ -554,6 +880,17 @@ public sealed class MascotEngine
         {
             _audio.Play(sound);
         }
+    }
+
+    private void OnBehaviorClimax(BehaviorDefinition def)
+    {
+        // The big release of a build-up move: a layered, screen-filling burst.
+        Vector2 head = HeadWorld();
+        _particles.EmitMagic(head, 18);
+        _particles.EmitStars(head, 12);
+        _particles.EmitConfetti(head, 26);
+        _audio.Play("magic");
+        _emotion.Nudge(Mood.Excited, 1f, 2f);
     }
 
     private void EmitBehaviorParticle(ParticleKind kind)
@@ -676,6 +1013,8 @@ public sealed class MascotEngine
         _mascot.Position = new Vector2(cx, _world.GroundY);
         _mascot.Velocity = Vector2.Zero;
         _mascot.OnGround = true;
+        _mascot.Surface = Surface.Floor;
+        _mascot.RenderAngleOverride = null;
     }
 
     private void PersistAndSave()

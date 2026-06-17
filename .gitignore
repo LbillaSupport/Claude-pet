@@ -27,3 +27,10 @@ desktop.ini
 
 # App runtime data (should live in %AppData%, never committed)
 crash.log
+
+# Temporary screenshots from the visual-verification loop
+_*.png
+
+# Velopack / release packaging output
+Releases/
+dist/

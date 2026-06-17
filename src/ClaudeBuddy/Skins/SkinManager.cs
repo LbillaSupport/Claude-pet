@@ -27,6 +27,9 @@ public sealed class SkinManager
     {
         _skins.Clear();
         _skins.Add(Skin.BuiltIn);
+        _skins.Add(Skin.Creeper);
+        _skins.Add(Skin.Ghast);
+        _skins.Add(Skin.Nicolaia);
 
         foreach (string root in SkinRoots(appData))
         {
@@ -82,7 +85,7 @@ public sealed class SkinManager
                 Id = id,
                 Name = manifest.Name ?? id,
                 Author = manifest.Author ?? "Unknown",
-                Palette = ResolvePalette(manifest.Colors),
+                Palette = ResolvePalette(manifest.Colors, manifest.Style),
                 SourceFolder = folder,
                 SoundOverrides = ResolveSounds(folder, manifest.Sounds),
             };
@@ -94,16 +97,25 @@ public sealed class SkinManager
         }
     }
 
-    private static SkinPalette ResolvePalette(SkinColors? c)
+    private static SkinPalette ResolvePalette(SkinColors? c, string? style)
     {
         SkinPalette d = SkinPalette.Default;
+        SkinStyle resolvedStyle = style?.Trim().ToLowerInvariant() switch
+        {
+            "creeper" => SkinStyle.Creeper,
+            "ghast" => SkinStyle.Ghast,
+            "nicolaia" => SkinStyle.Nicolaia,
+            _ => SkinStyle.Claud,
+        };
+
         if (c is null)
         {
-            return d;
+            return new SkinPalette { Style = resolvedStyle };
         }
 
         return new SkinPalette
         {
+            Style = resolvedStyle,
             Body = Parse(c.Body, d.Body),
             BodyShadow = Parse(c.BodyShadow, d.BodyShadow),
             Belly = Parse(c.Belly, d.Belly),

@@ -13,6 +13,7 @@ public sealed class MenuState
     public bool Muted { get; init; }
     public bool LaunchOnStartup { get; init; }
     public bool PhotoMode { get; init; }
+    public bool ShowBattery { get; init; }
     public float AnimationSpeed { get; init; } = 1f;
     public float Volume { get; init; } = 0.7f;
     public float BehaviorFrequency { get; init; } = 1f;
@@ -61,6 +62,7 @@ public sealed class ContextMenu
             Check(menu, MenuCommand.ToggleAlwaysOnTop, "Always On Top", state.AlwaysOnTop);
             Check(menu, MenuCommand.ToggleLaunchOnStartup, "Launch On Startup", state.LaunchOnStartup);
             Check(menu, MenuCommand.PhotoMode, "Photo Mode", state.PhotoMode);
+            Check(menu, MenuCommand.ToggleBattery, "Show Session Battery", state.ShowBattery);
             Add(menu, MenuCommand.ResetPosition, "Reset Position");
             Separator(menu);
 

@@ -38,7 +38,38 @@ public sealed class AppSettings
 
     public bool LaunchOnStartup { get; set; }
 
-    public bool WeatherEnabled { get; set; } = true;
+    /// <summary>
+    /// Ambient fake weather (drifting snow/leaves/petals around the mascot). Off by
+    /// default so particles only ever appear from deliberate behaviours (petting, dancing,
+    /// celebrating, …) rather than floating around all the time.
+    /// </summary>
+    public bool WeatherEnabled { get; set; }
+
+    /// <summary>
+    /// When true, the mascot reacts while you type (it installs a count-only keyboard
+    /// hook — see <c>Input/KeyboardActivityTracker</c>). Set false to never install any
+    /// keyboard hook at all.
+    /// </summary>
+    public bool KeyboardReactions { get; set; } = true;
+
+    /// <summary>Show the little session "battery" above the mascot.</summary>
+    public bool ShowBattery { get; set; } = true;
+
+    /// <summary>
+    /// Token budget for the rolling 5-hour session window. 0 = auto-calibrate from your
+    /// own historical peak usage (see <see cref="ObservedMaxSessionTokens"/>). Set a real
+    /// number if you know your plan's limit and want the battery to track it exactly.
+    /// </summary>
+    public long SessionTokenLimit { get; set; }
+
+    /// <summary>Largest 5-hour-window usage ever observed; used to auto-scale the battery.</summary>
+    public long ObservedMaxSessionTokens { get; set; }
+
+    /// <summary>
+    /// Check GitHub Releases for a newer version on startup and update silently in the
+    /// background. On by default so non-technical users always get fixes automatically.
+    /// </summary>
+    public bool AutoUpdate { get; set; } = true;
 
     /// <summary>Accumulated happiness (0 – 1). Rises with petting, decays slowly.</summary>
     public float Happiness { get; set; } = 0.5f;

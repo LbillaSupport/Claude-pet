@@ -85,6 +85,28 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+    // ---- Low-level keyboard hook -----------------------------------------
+    // Used ONLY to notice that *a* key was pressed (and how often) so the mascot can
+    // react to typing. The callback never inspects or stores which key — see
+    // Input/KeyboardActivityTracker for the privacy note.
+
+    public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    public const int WH_KEYBOARD_LL = 13;
+    public const int HC_ACTION = 0;
+    public const uint WM_KEYDOWN = 0x0100;
+    public const uint WM_SYSKEYDOWN = 0x0104;
+
     // ---- Layered window blit ---------------------------------------------
 
     [StructLayout(LayoutKind.Sequential)]
@@ -210,6 +232,22 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern uint GetDoubleClickTime();
 
+    // ---- Mouse capture + button state ------------------------------------
+    // SetCapture routes ALL mouse messages to our window while a button is held, so a
+    // fast drag can't "lose" the WM_LBUTTONUP to whatever window the cursor flew over.
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetCapture(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
+
+    public const int VK_LBUTTON = 0x01;
+
     // ---- DPI -------------------------------------------------------------
 
     [DllImport("user32.dll")]
@@ -237,6 +275,17 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    // A timer keeps the game loop ticking while a modal menu owns the message pump:
+    // WM_TIMER messages are still delivered during TrackPopupMenuEx's modal loop, so
+    // we drive a frame from each one (see LayeredWindow). Otherwise the mascot freezes
+    // for as long as the right-click menu is open.
+    [DllImport("user32.dll")]
+    public static extern UIntPtr SetTimer(IntPtr hWnd, UIntPtr nIDEvent, uint uElapse, IntPtr lpTimerFunc);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool KillTimer(IntPtr hWnd, UIntPtr uIDEvent);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
@@ -296,6 +345,7 @@ internal static class NativeMethods
     public const uint WM_RBUTTONUP = 0x0205;
     public const uint WM_DISPLAYCHANGE = 0x007E;
     public const uint WM_DPICHANGED = 0x02E0;
+    public const uint WM_TIMER = 0x0113;
     public const uint WM_NULL = 0x0000;
 
     public static readonly IntPtr HWND_TOPMOST = new(-1);

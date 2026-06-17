@@ -19,6 +19,13 @@ public sealed class LayeredWindow
     private IntPtr _hwnd;
     private bool _running;
 
+    // Identifies the timer that keeps the simulation alive during a modal menu loop.
+    private static readonly UIntPtr ModalFrameTimerId = (UIntPtr)1;
+
+    // The per-frame callback, stashed so WM_TIMER can drive a frame while a modal menu
+    // (TrackPopupMenuEx) has hijacked the message pump and RunLoop is blocked.
+    private Action? _onFrame;
+
     public LayeredWindow() => _wndProcDelegate = WndProc;
 
     // -- Input events (screen coordinates) ---------------------------------
@@ -75,9 +82,22 @@ public sealed class LayeredWindow
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }
 
+    /// <summary>
+    /// Runs the simulation while a modal menu owns the message pump. Call before
+    /// <c>TrackPopupMenuEx</c> and pair with <see cref="EndModalTicks"/> afterwards.
+    /// While the timer is alive, WM_TIMER fires the same per-frame callback, so the
+    /// mascot keeps breathing/walking instead of freezing under the open menu.
+    /// </summary>
+    public void BeginModalTicks() =>
+        NativeMethods.SetTimer(_hwnd, ModalFrameTimerId, 1000 / EngineConstants.TargetFps, IntPtr.Zero);
+
+    /// <summary>Stops the modal keep-alive timer (see <see cref="BeginModalTicks"/>).</summary>
+    public void EndModalTicks() => NativeMethods.KillTimer(_hwnd, ModalFrameTimerId);
+
     /// <summary>Runs the pump + simulation until the window closes.</summary>
     public void RunLoop(Action onFrame)
     {
+        _onFrame = onFrame;
         _running = true;
         NativeMethods.timeBeginPeriod(1);
         var stopwatch = Stopwatch.StartNew();
@@ -138,10 +158,14 @@ public sealed class LayeredWindow
         switch (msg)
         {
             case NativeMethods.WM_LBUTTONDOWN:
+                // Capture the mouse so a fast drag keeps sending us moves + the eventual
+                // button-up even when the cursor leaves the mascot's opaque pixels.
+                NativeMethods.SetCapture(hWnd);
                 Raise(LeftButtonDown);
                 return IntPtr.Zero;
 
             case NativeMethods.WM_LBUTTONUP:
+                NativeMethods.ReleaseCapture();
                 Raise(LeftButtonUp);
                 return IntPtr.Zero;
 
@@ -151,6 +175,16 @@ public sealed class LayeredWindow
 
             case NativeMethods.WM_RBUTTONUP:
                 Raise(RightButtonUp);
+                return IntPtr.Zero;
+
+            case NativeMethods.WM_TIMER:
+                // Only fires while a modal menu has parked RunLoop (see BeginModalTicks);
+                // drive a frame so the mascot stays animated under the open menu.
+                if ((ulong)wParam == (ulong)ModalFrameTimerId)
+                {
+                    _onFrame?.Invoke();
+                }
+
                 return IntPtr.Zero;
 
             case NativeMethods.WM_DISPLAYCHANGE:

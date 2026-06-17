@@ -55,6 +55,14 @@ public sealed class BehaviorCatalog
         new() { Id = "watch-birds", DisplayName = "Watch Invisible Birds", Animation = AnimationState.LookUp, Category = BehaviorCategory.Idle, Weight = 1f, MinDuration = 3f, MaxDuration = 6f, Mood = Mood.Curious },
         new() { Id = "stare", DisplayName = "Stare Into Space", Animation = AnimationState.Idle, Category = BehaviorCategory.Idle, Weight = 1.4f, MinDuration = 4f, MaxDuration = 8f, Mood = Mood.Lazy },
         new() { Id = "balance-titles", DisplayName = "Balance On Window Titles", Animation = AnimationState.Stand, Category = BehaviorCategory.Idle, Weight = 0.8f, MinDuration = 3f, MaxDuration = 6f },
+        new() { Id = "groom", DisplayName = "Tidy Up", Animation = AnimationState.Groom, Category = BehaviorCategory.Idle, Weight = 2f, MinDuration = 2.4f, MaxDuration = 4f, Cooldown = 16f, Mood = Mood.Content, MoodIntensity = 0.5f },
+        new() { Id = "tap-foot", DisplayName = "Tap A Foot", Animation = AnimationState.TapFoot, Category = BehaviorCategory.Idle, Weight = 1.8f, MinDuration = 2.5f, MaxDuration = 5f, Cooldown = 12f, Mood = Mood.Content },
+        new() { Id = "wiggle", DisplayName = "Happy Wiggle", Animation = AnimationState.Wiggle, Category = BehaviorCategory.Idle, Weight = 1.6f, MinDuration = 2f, MaxDuration = 4f, Cooldown = 14f, Mood = Mood.Happy, MoodIntensity = 0.6f },
+        new() { Id = "daydream", DisplayName = "Daydream", Animation = AnimationState.LookUp, Category = BehaviorCategory.Idle, Weight = 1.5f, MinDuration = 4f, MaxDuration = 8f, Cooldown = 18f, Mood = Mood.Content, MoodIntensity = 0.5f, EnterParticle = ParticleKind.Magic },
+        new() { Id = "ponder", DisplayName = "Ponder Deeply", Animation = AnimationState.Think, Category = BehaviorCategory.Idle, Weight = 1.6f, MinDuration = 3.5f, MaxDuration = 7f, Cooldown = 14f, Mood = Mood.Curious },
+        new() { Id = "people-watch", DisplayName = "Watch The Cursor Pass By", Animation = AnimationState.LookAround, Category = BehaviorCategory.Idle, Weight = 1.4f, MinDuration = 3f, MaxDuration = 6f, Mood = Mood.Curious },
+        new() { Id = "admire-view", DisplayName = "Admire The View", Animation = AnimationState.Stand, Category = BehaviorCategory.Idle, Weight = 1.2f, MinDuration = 4f, MaxDuration = 8f, Mood = Mood.Content },
+        new() { Id = "wake-stretch", DisplayName = "Stretch In Place", Animation = AnimationState.Stretch, Category = BehaviorCategory.Idle, Weight = 1.4f, MinDuration = 1.8f, MaxDuration = 2.8f, Cooldown = 16f, Mood = Mood.Content },
 
         // ---- Exploration -------------------------------------------------
         new() { Id = "walk", DisplayName = "Walk", Animation = AnimationState.WalkRight, Movement = BehaviorMovement.Wander, Category = BehaviorCategory.Explore, Weight = 5f, MinDuration = 3f, MaxDuration = 7f, Cooldown = 2f },
@@ -71,8 +79,12 @@ public sealed class BehaviorCatalog
         new() { Id = "spin", DisplayName = "Spin", Animation = AnimationState.Spin, Category = BehaviorCategory.Playful, Weight = 1.2f, MinDuration = 1.2f, MaxDuration = 1.8f, Cooldown = 12f, Mood = Mood.Playful, EnterParticle = ParticleKind.Sparkle },
         new() { Id = "roll", DisplayName = "Roll", Animation = AnimationState.Roll, Movement = BehaviorMovement.Run, Category = BehaviorCategory.Playful, Weight = 1f, MinDuration = 1.4f, MaxDuration = 2.2f, Cooldown = 16f, Mood = Mood.Playful },
         new() { Id = "trip", DisplayName = "Trip", Animation = AnimationState.Trip, Category = BehaviorCategory.Active, Weight = 0.7f, MinDuration = 1.2f, MaxDuration = 1.6f, Cooldown = 25f, Mood = Mood.Surprised, MoodIntensity = 0.7f },
-        new() { Id = "climb", DisplayName = "Climb Window Borders", Animation = AnimationState.Jump, Category = BehaviorCategory.Active, Weight = 0.8f, MinDuration = 1f, MaxDuration = 1.4f, Cooldown = 15f },
+        new() { Id = "climb", DisplayName = "Climb The Walls", Animation = AnimationState.Climb, Category = BehaviorCategory.Active, Weight = 5.5f, MinDuration = 120f, MaxDuration = 120f, Cooldown = 14f, Mood = Mood.Playful, MoodIntensity = 0.5f },
         new() { Id = "chase-sparkles", DisplayName = "Chase Floating Sparkles", Animation = AnimationState.RunRight, Movement = BehaviorMovement.Run, Category = BehaviorCategory.Playful, Weight = 1.2f, MinDuration = 2.5f, MaxDuration = 4f, Cooldown = 14f, Mood = Mood.Excited, EnterParticle = ParticleKind.Sparkle },
+
+        // ---- Epic signature moves ---------------------------------------
+        new() { Id = "backflip", DisplayName = "Backflip!", Animation = AnimationState.Jump, Category = BehaviorCategory.Active, Weight = 1.4f, MinDuration = 1f, MaxDuration = 1.3f, Cooldown = 16f, Mood = Mood.Excited, MoodIntensity = 0.85f, EnterParticle = ParticleKind.Sparkle, EnterSound = "jump" },
+        new() { Id = "charge", DisplayName = "Power Up!", Animation = AnimationState.Charge, Category = BehaviorCategory.Playful, Weight = 1.1f, MinDuration = 1.5f, MaxDuration = 1.7f, Cooldown = 24f, Mood = Mood.Excited, MoodIntensity = 1f, ClimaxParticle = ParticleKind.Magic, EnterSound = "magic" },
 
         // ---- Social / curious about the cursor ---------------------------
         new() { Id = "watch-cursor", DisplayName = "Watch Cursor", Animation = AnimationState.LookAround, Category = BehaviorCategory.Social, Weight = 2.2f, MinDuration = 2.5f, MaxDuration = 5f, Mood = Mood.Curious },
@@ -111,5 +123,6 @@ public sealed class BehaviorCatalog
         new() { Id = "scared", DisplayName = "Scared", Animation = AnimationState.Scared, Movement = BehaviorMovement.FleeCursor, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 1.6f, MaxDuration = 2.2f, Cooldown = 0f, Mood = Mood.Scared, MoodIntensity = 1f },
         new() { Id = "wake", DisplayName = "Wake Up", Animation = AnimationState.WakeUp, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 1.2f, MaxDuration = 1.2f, Cooldown = 0f, Mood = Mood.Surprised },
         new() { Id = "greet", DisplayName = "Hello!", Animation = AnimationState.Wave, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 2.2f, MaxDuration = 2.2f, Cooldown = 0f, Mood = Mood.Happy, MoodIntensity = 0.8f, EnterParticle = ParticleKind.Sparkle, EnterSound = "happy" },
+        new() { Id = "type-along", DisplayName = "Type Along", Animation = AnimationState.TypeAlong, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 1.5f, MaxDuration = 1.5f, Cooldown = 0f, Mood = Mood.Excited, MoodIntensity = 0.5f },
     ];
 }

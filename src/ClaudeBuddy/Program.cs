@@ -14,6 +14,7 @@ using ClaudeBuddy.Services;
 using ClaudeBuddy.Skins;
 using ClaudeBuddy.UI;
 using Microsoft.Extensions.DependencyInjection;
+using Velopack;
 
 namespace ClaudeBuddy;
 
@@ -27,6 +28,10 @@ internal static class Program
     [STAThread]
     private static int Main()
     {
+        // MUST be the first thing that runs: Velopack intercepts install/update/uninstall
+        // hooks here and exits before the app proper starts. No-op for a plain dev run.
+        VelopackApp.Build().Run();
+
         using var mutex = new Mutex(initiallyOwned: true, "ClaudeBuddy.SingleInstance.v1", out bool isNew);
         if (!isNew)
         {
@@ -39,6 +44,10 @@ internal static class Program
 
             // Settings must be loaded before any consumer reads them.
             provider.GetRequiredService<ISettingsService>().Load();
+
+            // Quietly check GitHub Releases for a newer build (best-effort, background).
+            var updater = provider.GetRequiredService<UpdateService>();
+            updater.StartBackgroundCheck();
 
             var window = provider.GetRequiredService<LayeredWindow>();
             window.Create(EngineConstants.CanvasDesignSize);
@@ -57,6 +66,10 @@ internal static class Program
             {
                 engine.Shutdown();
             }
+
+            // If a newer build was downloaded this session, swap it in now (on exit) and
+            // relaunch — a running exe can't overwrite itself, so this is the safe moment.
+            updater.ApplyStagedUpdateOnExit();
 
             return 0;
         }
@@ -84,6 +97,7 @@ internal static class Program
         services.AddSingleton<Animator>();
         services.AddSingleton<ParticleSystem>();
         services.AddSingleton<CursorTracker>();
+        services.AddSingleton<KeyboardActivityTracker>();
 
         // Behaviour.
         services.AddSingleton<BehaviorCatalog>();
@@ -93,6 +107,7 @@ internal static class Program
         // Rendering.
         services.AddSingleton<CharacterArtist>();
         services.AddSingleton<ParticleRenderer>();
+        services.AddSingleton<UsageHudRenderer>();
         services.AddSingleton<LayeredWindow>();
 
         // Content.
@@ -102,6 +117,8 @@ internal static class Program
 
         // Services.
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<SessionUsageService>();
+        services.AddSingleton<UpdateService>();
         services.AddSingleton<IClaudeLauncher, ClaudeLauncher>();
         services.AddSingleton<IStartupService, StartupService>();
         services.AddSingleton<IAudioService, AudioService>();

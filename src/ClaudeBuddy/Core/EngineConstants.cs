@@ -14,11 +14,18 @@ public static class EngineConstants
 
     public const float TargetFrameSeconds = 1f / TargetFps;
 
-    /// <summary>The square canvas (logical px) that follows the mascot around.</summary>
-    public const int CanvasDesignSize = 440;
+    /// <summary>
+    /// The square canvas (logical px) that follows the mascot around. Sized generously
+    /// so the body still fits when rotated onto a wall or the ceiling.
+    /// </summary>
+    public const int CanvasDesignSize = 480;
 
-    /// <summary>Where the feet sit inside the canvas, as a fraction from the top.</summary>
-    public const float CanvasFeetAnchor = 0.80f;
+    /// <summary>
+    /// Where the contact point (feet) sits inside the canvas, as a fraction from the
+    /// top. Centred so the body has equal room to extend up, down, or sideways — which
+    /// is what lets the crab cling to any edge without clipping.
+    /// </summary>
+    public const float CanvasFeetAnchor = 0.5f;
 
     /// <summary>Nominal character height in logical px at scale 1.0.</summary>
     public const float CharacterHeight = 150f;
@@ -31,6 +38,9 @@ public static class EngineConstants
     public const float WalkSpeed = 46f;
     public const float RunSpeed = 150f;
     public const float JumpVelocity = 920f;
+
+    /// <summary>Speed (logical px/s) the crab climbs walls and crawls the ceiling.</summary>
+    public const float ClimbSpeed = 70f;
 
     /// <summary>Horizontal drag applied to free momentum (per second).</summary>
     public const float GroundFriction = 6.5f;

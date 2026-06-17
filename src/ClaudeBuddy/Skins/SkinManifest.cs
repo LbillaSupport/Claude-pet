@@ -13,6 +13,9 @@ public sealed class SkinManifest
     public string? Description { get; set; }
     public string? Preview { get; set; }
 
+    /// <summary>Optional body archetype: "claud" (default), "creeper" or "ghast".</summary>
+    public string? Style { get; set; }
+
     public SkinColors? Colors { get; set; }
 
     /// <summary>Sound key → relative wav path inside the skin folder.</summary>
