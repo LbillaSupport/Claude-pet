@@ -67,11 +67,19 @@ Write-Host "==> Packaging Setup.exe + update packages with Velopack" -Foreground
     --outputDir $releasesDir
 if ($LASTEXITCODE -ne 0) { throw "vpk pack failed." }
 
+# vpk always emits a portable .zip too; drop it so the release stays uncluttered. The
+# user only ever needs ClaudeBuddy-win-Setup.exe — the .nupkg / .json files are the
+# auto-updater's machinery (the installed app reads them via the GitHub Releases API).
+Remove-Item (Join-Path $releasesDir "ClaudeBuddy-win-Portable.zip") -ErrorAction SilentlyContinue
+
 Write-Host ""
 Write-Host "==> Done. Output in: $releasesDir" -ForegroundColor Green
 Write-Host ""
-Write-Host "Publish the update:" -ForegroundColor Yellow
-Write-Host "  1. GitHub -> Releases -> Draft a new release, tag it  v$Version."
-Write-Host "  2. Upload ALL files from the Releases\ folder as assets."
-Write-Host "  3. Publish. Users share the link to ClaudeBuddy-win-Setup.exe to install;"
-Write-Host "     existing installs auto-update on their next restart."
+Write-Host "Publish the update (one command):" -ForegroundColor Yellow
+Write-Host "  gh release create v$Version (Get-ChildItem '$releasesDir' | % FullName) ``"
+Write-Host "    --target main --title 'Claude Buddy $Version' ``"
+Write-Host "    --notes '## Descarga`n\xF0\x9F\x91\x89 Bajate **ClaudeBuddy-win-Setup.exe** y ejecutalo. El resto de archivos los usa el auto-update.'"
+Write-Host ""
+Write-Host "Users install ClaudeBuddy-win-Setup.exe (direct link:" -ForegroundColor Gray
+Write-Host "  https://github.com/LbillaSupport/Claude-pet/releases/latest/download/ClaudeBuddy-win-Setup.exe )" -ForegroundColor Gray
+Write-Host "Existing installs auto-update on their next restart." -ForegroundColor Gray
