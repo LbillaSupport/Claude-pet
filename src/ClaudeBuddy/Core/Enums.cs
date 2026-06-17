@@ -19,6 +19,7 @@ public enum SkinStyle
     Creeper,
     Ghast,
     Nicolaia,
+    Galgo,
 }
 
 /// <summary>

@@ -230,13 +230,13 @@ always point at the surface.
 ## Skins with different shapes — `SkinStyle`
 
 Skins are normally just colour palettes, but `SkinPalette.Style` (`Core/Enums.SkinStyle`:
-`Claud`/`Creeper`/`Ghast`/`Nicolaia`) lets a skin change the silhouette/face.
+`Claud`/`Creeper`/`Ghast`/`Nicolaia`/`Galgo`) lets a skin change the silhouette/face.
 `CharacterArtist.Draw` branches on it: Ghast uses `DrawTentacles` (dangling) instead of
 `DrawLegs`; the face is `DrawFace` (Claud), `DrawCreeperFace` (square eyes + the iconic
 frown blocks), or `DrawGhastFace` (sad slanted eyes + frown, opens to a red maw when
-`MouthOpen>0.3`). Built-in skins `Skin.Creeper`/`Skin.Ghast`/`Skin.Nicolaia` are always
-available (added in `SkinManager.Discover` alongside `BuiltIn`). JSON skins can set
-`"style":"creeper|ghast|nicolaia"` (parsed in `SkinManager.ResolvePalette`).
+`MouthOpen>0.3`). Built-in skins `Skin.Creeper`/`Skin.Ghast`/`Skin.Nicolaia`/`Skin.Galgo`
+are always available (added in `SkinManager.Discover` alongside `BuiltIn`). JSON skins can
+set `"style":"creeper|ghast|nicolaia|galgo"` (parsed in `SkinManager.ResolvePalette`).
 
 - **Nicolaia** = the classic block dressed as a dapper fellow: `DrawNicolaiaSuit` (black
   jacket over the lower torso + a wide white shirt V with lapels, a bow-tie and waistcoat
@@ -244,10 +244,31 @@ available (added in `SkinManager.Discover` alongside `BuiltIn`). JSON skins can 
   (brown side-curls/peyot down each cheek + a tall black **top hat**). Palette mapping:
   `Body`=skin tone, `BodyShadow`=black suit/hat, `Belly`=white shirt, `Accent`=curl brown.
   **Gotcha:** the top-hat brim is sunk slightly INTO the face (`brimBottom = BodyTop+0.06h`)
-  and is wider than the block — otherwise a sliver of skin shows between hat and head.
-- **Per-skin HUD headroom:** `SkinPalette.HudHeadroom` (default 0.98, Nicolaia 1.34) is how
-  far above the feet (×height) the battery/bubble floats. `MascotEngine.DrawUsageHud` reads
-  it so the battery clears tall headgear (the top hat) instead of sitting mid-hat.
+  and is wider than the block — otherwise a sliver of skin shows between hat and head. The
+  mouth is pulled up via `DrawFace(..., mouthDrop: 0.55f)` so it lands on the face strip,
+  not on the white shirt (`DrawMouth` takes a `drop` factor; default 1.0 for every other skin).
+- **Galgo** = a whole **cartoon city bus** (line 34 Liniers–Palermo) in a **Vélez Sarsfield
+  bucket hat** — modelled on a real sticker. It does NOT use the block/legs: `DrawGalgo`
+  short-circuits the pipeline and draws its own shell, windows, door, wheels, smiley
+  windshield-face and `DrawGalgoHat` (the piluso: navy brim, white crown band with
+  `DrawVelezShield` (vector CAFVS crest) + "VÉLEZ SARSFIELD", all clipped to the crown so
+  nothing spills). Palette: `Body`=white shell, `BodyShadow`=Vélez navy, `Accent`=red
+  stripe, `Belly`=light-blue glass, `Pupil`=black, `Mouth`=red smile. **Two key fixes:**
+  (1) it's hand-drawn facing LEFT like the sticker, so the branch **cancels the facing
+  mirror** (`canvas.Scale(-1,1)`) — otherwise the lettering renders backwards; (2) a rigid
+  vehicle must not wobble/squash like a blob, so the branch **discards the whole-body
+  transform** (BodyOffset/rotation/squash) and re-anchors with only a gentle vertical bob —
+  this killed the "drunk" look on double-click/pet. Only the pupils track the cursor.
+- **Per-skin HUD headroom:** `SkinPalette.HudHeadroom` (default 0.98, Nicolaia 1.34, Galgo
+  1.55) is how far above the feet (×height) the battery/bubble floats. `MascotEngine.DrawUsageHud`
+  reads it so the battery clears tall headgear (top hat / bucket hat) instead of sitting on it.
+
+### `--render` CLI (deterministic skin screenshots)
+`ClaudeBuddy --render <skinId> <out.png> [sizePx]` (handled in `Program.Main`/`RenderSkinToFile`)
+draws ONE skin to a centred PNG and exits — no window, no game loop, no wandering. Use this to
+verify a skin's look instead of screenshotting the live mascot (which walks out of frame). It
+instantiates `CharacterArtist` + a neutral `Pose` directly and renders at `height = size*0.42`
+with feet at `size*0.62` (leaves headroom for hats/buses).
 
 ## Session battery is TIME-based (not token-%)
 

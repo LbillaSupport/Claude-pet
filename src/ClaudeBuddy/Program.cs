@@ -26,11 +26,19 @@ namespace ClaudeBuddy;
 internal static class Program
 {
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         // MUST be the first thing that runs: Velopack intercepts install/update/uninstall
         // hooks here and exits before the app proper starts. No-op for a plain dev run.
         VelopackApp.Build().Run();
+
+        // QA / marketing helper: `ClaudeBuddy --render <skinId> <out.png> [sizePx]` draws a
+        // single skin to a centred PNG and exits — no window, no wandering. Lets us verify a
+        // skin's look deterministically (the mascot never walks out of frame).
+        if (args.Length >= 3 && args[0] == "--render")
+        {
+            return RenderSkinToFile(args[1], args[2], args.Length >= 4 ? int.Parse(args[3]) : 512);
+        }
 
         using var mutex = new Mutex(initiallyOwned: true, "ClaudeBuddy.SingleInstance.v1", out bool isNew);
         if (!isNew)
@@ -124,6 +132,42 @@ internal static class Program
         services.AddSingleton<MascotEngine>();
 
         return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Renders one skin to a centred PNG and returns 0/1. Used by the `--render` CLI mode
+    /// to verify a skin's appearance without launching the live (wandering) mascot.
+    /// </summary>
+    private static int RenderSkinToFile(string skinId, string outPath, int size)
+    {
+        try
+        {
+            var skins = new SkinManager();
+            skins.Discover(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+            skins.SetCurrent(skinId);
+
+            var artist = new CharacterArtist();
+            var pose = new Pose { MouthCurve = 0.7f, MouthOpen = 0.2f };
+
+            var info = new SkiaSharp.SKImageInfo(size, size, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+            using SkiaSharp.SKSurface surface = SkiaSharp.SKSurface.Create(info);
+            float anchorX = size * 0.5f;
+            float anchorY = size * 0.62f;            // feet a little below centre
+            float height = size * 0.42f;             // leave headroom for hats/buses
+            artist.Draw(surface.Canvas, new SkiaSharp.SKPoint(anchorX, anchorY), anchorY,
+                height, Facing.Right, 1f, 1f, pose, skins.Current.Palette, 1f);
+
+            using SkiaSharp.SKImage image = surface.Snapshot();
+            using SkiaSharp.SKData data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            using FileStream fs = File.Create(outPath);
+            data.SaveTo(fs);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            LogCrash(ex);
+            return 1;
+        }
     }
 
     private static void LogCrash(Exception ex)

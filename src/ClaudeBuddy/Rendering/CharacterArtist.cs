@@ -67,6 +67,24 @@ public sealed class CharacterArtist
         // toward the real cursor regardless of which way the body faces.
         float lookX = pose.EyeLookX * sign;
 
+        // Galgo is a whole cartoon bus, not the block-and-legs body — it draws its own
+        // silhouette, wheels and face, so it short-circuits the rest of the pipeline.
+        if (palette.Style == SkinStyle.Galgo)
+        {
+            // A rigid bus shouldn't wobble, squash, rotate or sway like a soft blob — the
+            // organic pet/landing/idle motion looks "drunk" on a vehicle. So we discard the
+            // whole-body transform built above and re-anchor with only a gentle vertical
+            // bob. The art is hand-drawn facing left (like the sticker); only the pupils
+            // track the cursor.
+            canvas.Restore();                 // drop BodyOffset + rotation + squash
+            canvas.Save();
+            float bob = pose.BodyOffset.Y * 0.4f * dpiScale; // a soft, damped bounce only
+            canvas.Translate(feet.X, feet.Y + bob);
+            DrawGalgo(canvas, h, pose, palette, pose.EyeLookX);
+            canvas.Restore();
+            return;
+        }
+
         // Drawn back-to-front so the body overlaps the limbs. The silhouette and face
         // depend on the skin's style (classic Claw'd, Creeper, or floaty Ghast).
         if (palette.Style == SkinStyle.Ghast)
@@ -90,8 +108,10 @@ public sealed class CharacterArtist
                 break;
             case SkinStyle.Nicolaia:
                 // Suit + shirt sit on the torso below the face; curls + hat go on top.
+                // The face strip above the collar is short, so the mouth is pulled up
+                // (mouthDrop 0.55) to keep it off the white shirt.
                 DrawNicolaiaSuit(canvas, h, palette);
-                DrawFace(canvas, h, pose, palette, lookX);
+                DrawFace(canvas, h, pose, palette, lookX, mouthDrop: 0.55f);
                 DrawNicolaiaCrown(canvas, h, pose, palette);
                 break;
             default:
@@ -194,7 +214,11 @@ public sealed class CharacterArtist
     private const float EyeOffsetX = 0.155f;
     private const float EyeCenterY = -0.62f;
 
-    private void DrawFace(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    // <paramref name="mouthDrop"/> scales how far below the eyes the mouth sits. The
+    // classic block has the whole lower body to work with (1.0); dressed skins like
+    // Nicolaia have only a short strip of face above the collar, so they pass a smaller
+    // value to keep the mouth on the face instead of on the shirt.
+    private void DrawFace(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX, float mouthDrop = 1.0f)
     {
         float eyeX = EyeOffsetX * h;
         float eyeY = EyeCenterY * h;
@@ -216,7 +240,7 @@ public sealed class CharacterArtist
         DrawEye(canvas, eyeX, eyeY, s, pose, palette, lookX);
 
         DrawBrows(canvas, pose, palette, eyeX, eyeY, s);
-        DrawMouth(canvas, h, pose, palette, eyeY, s);
+        DrawMouth(canvas, h, pose, palette, eyeY, s, mouthDrop);
     }
 
     private void DrawEye(SKCanvas canvas, float ex, float ey, float s, Pose pose, SkinPalette palette, float lookX)
@@ -309,7 +333,7 @@ public sealed class CharacterArtist
         canvas.DrawLine(eyeX - len, browY - tilt, eyeX + len, browY + tilt, _stroke);
     }
 
-    private void DrawMouth(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float eyeY, float s)
+    private void DrawMouth(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float eyeY, float s, float drop = 1.0f)
     {
         // Claw'd is mouthless at rest; a little mouth only appears for big moments
         // (yawning, snoring, gasping) so the clean face is preserved the rest of the time.
@@ -318,7 +342,7 @@ public sealed class CharacterArtist
             return;
         }
 
-        float my = eyeY + (s * 1.6f);
+        float my = eyeY + (s * 1.6f * drop);
         float openH = pose.MouthOpen * 0.13f * h;
         float mw = 0.075f * h;
 
@@ -564,6 +588,295 @@ public sealed class CharacterArtist
         canvas.DrawRect(new SKRect(-crownHalf, brimTop - (0.03f * h), crownHalf, brimTop), _fill);
         _fill.Color = new SKColor(255, 255, 255, 22);
         canvas.DrawRect(new SKRect(-crownHalf + (0.02f * h), crownTop + (0.02f * h), -crownHalf + (0.05f * h), brimTop), _fill);
+    }
+
+    // ---- Galgo (the cartoon bus, line 34 Liniers–Palermo, Vélez bucket hat) -------
+    // A whole-body character: a 3/4-view city bus seen from its smiley front-left. It
+    // doesn't use the block/legs at all. Origin is feet at (0,0); the bus sits on its
+    // wheels at y=0 and extends up into negative Y. Palette mapping:
+    //   Body = white shell · BodyShadow = navy skirt/Vélez blue · Accent = red stripe
+    //   Belly = light-blue glass · Pupil = black (tyres, outlines, pupils) · Mouth = red mouth
+    private void DrawGalgo(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    {
+        // Outline helper.
+        _stroke.Color = palette.Pupil.ToSk();
+        _stroke.StrokeWidth = 0.018f * h;
+        _stroke.StrokeCap = SKStrokeCap.Round;
+        _stroke.StrokeJoin = SKStrokeJoin.Round;
+
+        SKColor white = palette.Body.ToSk();
+        SKColor navy = palette.BodyShadow.ToSk();
+        SKColor red = palette.Accent.ToSk();
+        SKColor glass = palette.Belly.ToSk();
+        SKColor ink = palette.Pupil.ToSk();
+
+        float bodyTop = -1.06f * h;     // roof
+        float bodyBottom = -0.12f * h;  // chassis (wheels hang below)
+        float frontX = -0.62f * h;      // nose (the face)
+        float rearX = 0.96f * h;        // tail
+
+        // --- Body shell (rounded box, taller/rounder at the nose) --------------
+        using (var shell = new SKPath())
+        {
+            shell.MoveTo(frontX + (0.02f * h), bodyBottom);
+            shell.LineTo(frontX, bodyTop + (0.30f * h));
+            // rounded windshield brow up to the roof
+            shell.QuadTo(frontX, bodyTop + (0.04f * h), frontX + (0.18f * h), bodyTop);
+            shell.LineTo(rearX - (0.10f * h), bodyTop + (0.02f * h));
+            shell.QuadTo(rearX, bodyTop + (0.04f * h), rearX, bodyTop + (0.22f * h));
+            shell.LineTo(rearX, bodyBottom);
+            shell.Close();
+            _fill.Color = white;
+            canvas.DrawPath(shell, _fill);
+            canvas.DrawPath(shell, _stroke);
+        }
+
+        // --- Coloured stripes (red high, blue low) along the side --------------
+        _fill.Color = red;
+        canvas.DrawRect(new SKRect(frontX + (0.20f * h), bodyTop + (0.05f * h), rearX, bodyTop + (0.12f * h)), _fill);
+        _fill.Color = navy;
+        canvas.DrawRect(new SKRect(frontX + (0.06f * h), bodyBottom - (0.20f * h), rearX, bodyBottom), _fill);
+        // a thin red accent above the blue skirt
+        _fill.Color = red;
+        canvas.DrawRect(new SKRect(frontX + (0.06f * h), bodyBottom - (0.235f * h), rearX, bodyBottom - (0.205f * h)), _fill);
+
+        // --- Side: door + windows ---------------------------------------------
+        float winTop = bodyTop + (0.22f * h);
+        float winBottom = bodyBottom - (0.28f * h);
+        // black folding door just behind the nose
+        _fill.Color = ink;
+        canvas.DrawRoundRect(new SKRect(-0.04f * h, winTop - (0.04f * h), 0.16f * h, bodyBottom - (0.02f * h)), 0.01f * h, 0.01f * h, _fill);
+        _stroke.StrokeWidth = 0.01f * h;
+        canvas.DrawLine(0.06f * h, winTop - (0.02f * h), 0.06f * h, bodyBottom - (0.04f * h), _stroke);
+        // two light-blue side windows
+        _fill.Color = glass;
+        canvas.DrawRoundRect(new SKRect(0.22f * h, winTop, 0.52f * h, winBottom), 0.02f * h, 0.02f * h, _fill);
+        canvas.DrawRoundRect(new SKRect(0.58f * h, winTop, 0.90f * h, winBottom), 0.02f * h, 0.02f * h, _fill);
+        _stroke.StrokeWidth = 0.014f * h;
+        canvas.DrawRoundRect(new SKRect(0.22f * h, winTop, 0.52f * h, winBottom), 0.02f * h, 0.02f * h, _stroke);
+        canvas.DrawRoundRect(new SKRect(0.58f * h, winTop, 0.90f * h, winBottom), 0.02f * h, 0.02f * h, _stroke);
+
+        // --- Front face: route sign, windshield "eyes", smile, bumper ----------
+        DrawGalgoFace(canvas, h, pose, palette, lookX, frontX, bodyTop, bodyBottom, white, navy, red, glass, ink);
+
+        // --- Wheels ------------------------------------------------------------
+        DrawGalgoWheel(canvas, h, -0.30f * h, bodyBottom, ink, white);
+        DrawGalgoWheel(canvas, h, 0.62f * h, bodyBottom, ink, white);
+
+        // --- Vélez bucket hat on the roof, over the nose -----------------------
+        DrawGalgoHat(canvas, h, frontX, bodyTop, navy, white, glass, ink);
+    }
+
+    private void DrawGalgoFace(
+        SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX,
+        float frontX, float bodyTop, float bodyBottom,
+        SKColor white, SKColor navy, SKColor red, SKColor glass, SKColor ink)
+    {
+        float faceRight = frontX + (0.40f * h);  // where the nose meets the side
+
+        // Route sign band: "34  LINIERS / PALERMO".
+        _fill.Color = navy;
+        var sign = new SKRect(frontX + (0.02f * h), bodyTop + (0.10f * h), faceRight, bodyTop + (0.28f * h));
+        canvas.DrawRoundRect(sign, 0.01f * h, 0.01f * h, _fill);
+        using (var font = new SKPaint { IsAntialias = true, Color = SKColors.White, TextSize = 0.085f * h, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), TextAlign = SKTextAlign.Left })
+        {
+            canvas.DrawText("34", frontX + (0.04f * h), bodyTop + (0.225f * h), font);
+            using var small = font.Clone();
+            small.TextSize = 0.05f * h;
+            canvas.DrawText("LINIERS", frontX + (0.155f * h), bodyTop + (0.175f * h), small);
+            canvas.DrawText("PALERMO", frontX + (0.155f * h), bodyTop + (0.245f * h), small);
+        }
+
+        // Windshield split into two panes = the eyes. Light-blue glass, dark frame.
+        float eyeTop = bodyTop + (0.30f * h);
+        float eyeBottom = bodyBottom - (0.34f * h);
+        var glassRect = new SKRect(frontX + (0.02f * h), eyeTop, faceRight, eyeBottom);
+        _fill.Color = glass;
+        canvas.DrawRoundRect(glassRect, 0.03f * h, 0.03f * h, _fill);
+        _stroke.Color = ink;
+        _stroke.StrokeWidth = 0.016f * h;
+        canvas.DrawRoundRect(glassRect, 0.03f * h, 0.03f * h, _stroke);
+
+        // Two big white cartoon eyes inside the glass, pupils tracking the cursor.
+        float eyeCY = (eyeTop + eyeBottom) * 0.5f - (0.02f * h);
+        float eyeR = 0.10f * h;
+        float exL = frontX + (0.14f * h);
+        float exR = frontX + (0.30f * h);
+        foreach (float ex in new[] { exL, exR })
+        {
+            _fill.Color = SKColors.White;
+            canvas.DrawCircle(ex, eyeCY, eyeR, _fill);
+            _stroke.StrokeWidth = 0.01f * h;
+            canvas.DrawCircle(ex, eyeCY, eyeR, _stroke);
+            float open = MathUtil.Clamp(pose.EyeOpen, 0.2f, 1.2f);
+            float px = ex + (lookX * eyeR * 0.4f);
+            float py = eyeCY + (pose.EyeLookY * eyeR * 0.4f) + (eyeR * 0.15f);
+            _fill.Color = ink;
+            canvas.DrawCircle(px, py, eyeR * 0.5f * open, _fill);
+            _fill.Color = SKColors.White;
+            canvas.DrawCircle(px - (eyeR * 0.18f), py - (eyeR * 0.2f), eyeR * 0.16f, _fill);
+        }
+
+        // Big friendly smile below the windshield.
+        _stroke.Color = new SKColor(0x6E, 0x20, 0x18);
+        _stroke.StrokeWidth = 0.02f * h;
+        float smileY = eyeBottom + (0.02f * h);
+        float smileW = 0.16f * h;
+        float smileCX = frontX + (0.20f * h);
+        using (var smile = new SKPath())
+        {
+            smile.MoveTo(smileCX - smileW, smileY);
+            smile.QuadTo(smileCX, smileY + (0.12f * h) + (pose.MouthCurve * 0.02f * h), smileCX + smileW, smileY);
+            // fill the open mouth red
+            using var lips = new SKPath();
+            lips.MoveTo(smileCX - smileW, smileY);
+            lips.QuadTo(smileCX, smileY + (0.13f * h), smileCX + smileW, smileY);
+            lips.QuadTo(smileCX, smileY + (0.05f * h), smileCX - smileW, smileY);
+            lips.Close();
+            _fill.Color = palette.Mouth.ToSk();
+            canvas.DrawPath(lips, _fill);
+            canvas.DrawPath(smile, _stroke);
+        }
+
+        // Grey front bumper with a Vélez-themed plate "CAV 1910" (founding year).
+        float bumperTop = bodyBottom - (0.10f * h);
+        _fill.Color = new SKColor(0xB9, 0xC2, 0xC7);
+        canvas.DrawRoundRect(new SKRect(frontX - (0.01f * h), bumperTop, faceRight + (0.04f * h), bodyBottom), 0.03f * h, 0.03f * h, _fill);
+        _fill.Color = navy;
+        var plate = new SKRect(frontX + (0.085f * h), bumperTop + (0.018f * h), frontX + (0.30f * h), bodyBottom - (0.012f * h));
+        canvas.DrawRoundRect(plate, 0.008f * h, 0.008f * h, _fill);
+        using (var pf = new SKPaint { IsAntialias = true, Color = SKColors.White, TextSize = 0.04f * h, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), TextAlign = SKTextAlign.Center })
+        {
+            canvas.DrawText("CAV 1910", (plate.Left + plate.Right) * 0.5f, plate.MidY + (0.014f * h), pf);
+        }
+
+        // restore the default outline stroke colour for callers after us
+        _stroke.Color = palette.Pupil.ToSk();
+    }
+
+    private void DrawGalgoWheel(SKCanvas canvas, float h, float cx, float groundY, SKColor tyre, SKColor hub)
+    {
+        float r = 0.13f * h;
+        float cy = groundY + (0.02f * h); // dip slightly below the chassis line
+        _fill.Color = tyre;
+        canvas.DrawCircle(cx, cy, r, _fill);
+        _fill.Color = new SKColor(0xC9, 0xCF, 0xD3);
+        canvas.DrawCircle(cx, cy, r * 0.5f, _fill);
+        _fill.Color = new SKColor(0x8A, 0x93, 0x99);
+        canvas.DrawCircle(cx, cy, r * 0.2f, _fill);
+    }
+
+    private void DrawGalgoHat(SKCanvas canvas, float h, float frontX, float bodyTop, SKColor navy, SKColor white, SKColor glass, SKColor ink)
+    {
+        // A Vélez "bucket hat" (piluso) tilted over the bus's forehead, exactly like the
+        // sticker: a navy down-turned brim, a tall crown whose UPPER half is white (with the
+        // shield + "VÉLEZ SARSFIELD") and lower half navy.
+        float cx = frontX + (0.22f * h);      // centred over the face
+        float brimY = bodyTop + (0.085f * h); // brim sits down ON the roof (no float gap)
+        float crownTop = bodyTop - (0.30f * h);
+        float halfW = 0.34f * h;
+        float crownHalf = halfW * 0.72f;
+        float crownBottom = brimY - (0.015f * h);
+        float splitY = (crownTop + crownBottom) * 0.5f; // white above, navy below
+
+        _stroke.Color = ink;
+        _stroke.StrokeWidth = 0.014f * h;
+
+        // --- Crown: white top half ---
+        _fill.Color = white;
+        var crown = new SKRect(cx - crownHalf, crownTop, cx + crownHalf, crownBottom);
+        canvas.DrawRoundRect(crown, 0.05f * h, 0.05f * h, _fill);
+        // navy lower half of the crown
+        _fill.Color = navy;
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(crown, 0.05f * h, 0.05f * h), antialias: true);
+        canvas.DrawRect(new SKRect(crown.Left, splitY, crown.Right, crown.Bottom), _fill);
+        canvas.Restore();
+        canvas.DrawRoundRect(crown, 0.05f * h, 0.05f * h, _stroke);
+
+        // Everything on the crown is clipped to the white panel so no lettering or shield
+        // can spill past the hat edge.
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(crown, 0.05f * h, 0.05f * h), antialias: true);
+
+        // --- Vélez Sarsfield shield (escudo) on the white part ---
+        // Reproduced in vectors (the character is fully procedural — no bitmaps). The real
+        // crest is a blue shield with a scalloped top edge and the "CAFVS" monogram in
+        // white. At this size we draw the shield shape faithfully and a legible stylised
+        // monogram (CA over VS) rather than the full interlaced lettering.
+        float shCx = crown.Left + (crownHalf * 0.42f);
+        float shTop = crownTop + (0.02f * h);
+        float shW = 0.072f * h;
+        float shH = 0.17f * h;
+        DrawVelezShield(canvas, shCx, shTop, shW, shH, navy, white);
+
+        // --- "VÉLEZ / SARSFIELD" centred in the space to the right of the shield ---
+        float textLeft = shCx + (shW * 1.2f);
+        float textCx = (textLeft + crown.Right) * 0.5f;
+        using (var vf = new SKPaint { IsAntialias = true, Color = navy, TextSize = 0.046f * h, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), TextAlign = SKTextAlign.Center })
+        {
+            canvas.DrawText("VÉLEZ", textCx, crownTop + (0.062f * h), vf);
+            canvas.DrawText("SARSFIELD", textCx, crownTop + (0.118f * h), vf);
+        }
+
+        canvas.Restore();
+
+        // --- Navy down-turned brim (drawn last so it sits in front of the crown base) ---
+        _fill.Color = navy;
+        using (var brim = new SKPath())
+        {
+            brim.MoveTo(cx - halfW, brimY - (0.02f * h));
+            brim.QuadTo(cx, brimY + (0.12f * h), cx + halfW, brimY - (0.02f * h));
+            brim.QuadTo(cx + (halfW * 0.6f), brimY - (0.08f * h), cx, brimY - (0.07f * h));
+            brim.QuadTo(cx - (halfW * 0.6f), brimY - (0.08f * h), cx - halfW, brimY - (0.02f * h));
+            brim.Close();
+            canvas.DrawPath(brim, _fill);
+            canvas.DrawPath(brim, _stroke);
+        }
+
+        _stroke.Color = ink;
+    }
+
+    // The Vélez Sarsfield crest: a blue shield with a scalloped top, white border, and the
+    // CAFVS monogram. (cx, top) is the top-centre; w/h are half-width / full height.
+    private void DrawVelezShield(SKCanvas canvas, float cx, float top, float w, float hgt, SKColor navy, SKColor white)
+    {
+        // Outer (white) shield with a 3-lobe scalloped top edge tapering to a point.
+        SKPath Shield(float ww, float tt, float hh)
+        {
+            var p = new SKPath();
+            p.MoveTo(cx - ww, tt + (hh * 0.10f));
+            // scalloped top: left lobe, centre dip up, right lobe
+            p.QuadTo(cx - (ww * 0.66f), tt - (hh * 0.06f), cx - (ww * 0.33f), tt + (hh * 0.05f));
+            p.QuadTo(cx, tt - (hh * 0.08f), cx + (ww * 0.33f), tt + (hh * 0.05f));
+            p.QuadTo(cx + (ww * 0.66f), tt - (hh * 0.06f), cx + ww, tt + (hh * 0.10f));
+            // right side down to the point
+            p.LineTo(cx + ww, tt + (hh * 0.45f));
+            p.QuadTo(cx + (ww * 0.85f), tt + (hh * 0.85f), cx, tt + hh);
+            p.QuadTo(cx - (ww * 0.85f), tt + (hh * 0.85f), cx - ww, tt + (hh * 0.45f));
+            p.Close();
+            return p;
+        }
+
+        using (SKPath outer = Shield(w, top, hgt))
+        {
+            _fill.Color = white;
+            canvas.DrawPath(outer, _fill);
+        }
+
+        using (SKPath inner = Shield(w * 0.78f, top + (hgt * 0.07f), hgt * 0.84f))
+        {
+            _fill.Color = navy;
+            canvas.DrawPath(inner, _fill);
+        }
+
+        // Stylised CAFVS monogram: "CA" up top, a big "V" and "S" below — the most legible
+        // reduction of the interlaced crest lettering at this tiny size.
+        using var top2 = new SKPaint { IsAntialias = true, Color = white, TextSize = hgt * 0.30f, Typeface = SKTypeface.FromFamilyName("Georgia", SKFontStyle.Bold), TextAlign = SKTextAlign.Center };
+        canvas.DrawText("CA", cx, top + (hgt * 0.42f), top2);
+        using var bot = top2.Clone();
+        bot.TextSize = hgt * 0.40f;
+        canvas.DrawText("VS", cx, top + (hgt * 0.82f), bot);
     }
 
     private void DrawProps(SKCanvas canvas, float h, Pose pose, SkinPalette palette)

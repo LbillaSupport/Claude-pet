@@ -115,4 +115,23 @@ public sealed class Skin
             HudHeadroom = 1.34f,                            // clear the tall top hat
         },
     };
+
+    /// <summary>Always-available "Galgo": the smiley line-34 city bus in a Vélez hat.</summary>
+    public static Skin Galgo => new()
+    {
+        Id = "galgo",
+        Name = "Galgo (Bondi 34)",
+        Author = "Claude Buddy",
+        Palette = new SkinPalette
+        {
+            Style = SkinStyle.Galgo,
+            Body = new RgbaColor(0xF4, 0xF6, 0xF8),        // white shell
+            BodyShadow = new RgbaColor(0x1F, 0x3A, 0x8A),  // Vélez navy (skirt + hat)
+            Belly = new RgbaColor(0xBF, 0xDD, 0xEC),        // light-blue glass
+            Pupil = new RgbaColor(0x16, 0x16, 0x18),        // black outlines / tyres / pupils
+            Accent = new RgbaColor(0xC8, 0x2A, 0x2A),       // red stripe
+            Mouth = new RgbaColor(0xC0, 0x33, 0x3A),        // red mouth
+            HudHeadroom = 1.55f,                            // clear the bucket hat
+        },
+    };
 }

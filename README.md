@@ -17,9 +17,10 @@ in the spirit of Desktop Goose, Tamagotchi and Clippy, but cute, calm and custom
 
 Claude Buddy isn't a looping sprite — it's a tiny simulation:
 
-- **A real brain.** A weighted behaviour state machine picks from **45+ behaviours**
+- **A real brain.** A weighted behaviour state machine picks from **50+ behaviours**
   (idle, walk, run, jump, sleep, dance, read, drink coffee, peek from screen edges,
-  chase sparkles, dream…) with probabilities, cooldowns and anti-repetition.
+  chase sparkles, dream, climb the walls, backflip, power-up…) with probabilities,
+  cooldowns and anti-repetition.
 - **A daily routine.** Energetic and coffee-carrying in the morning, exploratory in the
   afternoon, yawny in the evening, deeply asleep in the small hours — driven by your
   real clock.
@@ -40,6 +41,17 @@ shapes, which means it's crisp at any DPI, animates infinitely smoothly, and a b
 new **skin is just seven colours** in a tiny JSON file. Drop a folder in `/Skins` and
 it shows up in the menu instantly.
 
+A few skins go further and change the whole silhouette — these ship built-in and are
+always in the **Change Skin** menu:
+
+| Skin | Look |
+| --- | --- |
+| **Classic Claude** | The iconic terracotta "Claw'd" block with square eyes |
+| **Creeper** | The Minecraft creeper face |
+| **Ghast** | The floaty Minecraft ghast with dangling tentacles |
+| **Nicolaia** | A dapper fellow in a black top hat, three-piece suit and side-curls |
+| **Galgo (Bondi 34)** | A smiley cartoon city bus (line 34 Liniers–Palermo) in a Vélez Sarsfield hat |
+
 ## 🕹️ Controls
 
 | Action | Result |
@@ -50,7 +62,17 @@ it shows up in the menu instantly.
 | **Right click** | Open the full menu (skins, speed, volume, startup, photo mode…) |
 | **Move mouse fast** | Startle it |
 
-## 🚀 Quick start
+## ⬇️ Install (no coding needed)
+
+Grab the installer from the **[latest release](https://github.com/LbillaSupport/Claude-pet/releases/latest)**
+— download **`ClaudeBuddy-win-Setup.exe`** and double-click it. No admin rights, no .NET to
+install (it's self-contained). After that it **updates itself automatically** in the
+background whenever a new version is published — you never have to reinstall.
+
+Direct download:
+<https://github.com/LbillaSupport/Claude-pet/releases/latest/download/ClaudeBuddy-win-Setup.exe>
+
+## 🚀 Run from source (developers)
 
 > **Requirements:** Windows 10/11 (x64) and the **.NET 9 SDK**.
 
@@ -61,8 +83,9 @@ dotnet run --project src/ClaudeBuddy/ClaudeBuddy.csproj -c Release
 
 Or open **`ClaudeBuddy.sln`** in **Visual Studio 2022** (17.12+) and press **F5**.
 
-Full instructions, including publishing a single-file `.exe`, are in
-[`docs/BUILD.md`](docs/BUILD.md).
+To cut a new release (installer + auto-update packages), run
+`.\build-release.ps1 -Version X.Y.Z` and upload `.\Releases\*` to a GitHub Release tagged
+`vX.Y.Z`. Full instructions are in [`docs/BUILD.md`](docs/BUILD.md) and `CLAUDE.md`.
 
 ## 📚 Documentation
 

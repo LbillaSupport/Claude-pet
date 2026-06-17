@@ -30,6 +30,7 @@ public sealed class SkinManager
         _skins.Add(Skin.Creeper);
         _skins.Add(Skin.Ghast);
         _skins.Add(Skin.Nicolaia);
+        _skins.Add(Skin.Galgo);
 
         foreach (string root in SkinRoots(appData))
         {
@@ -105,6 +106,7 @@ public sealed class SkinManager
             "creeper" => SkinStyle.Creeper,
             "ghast" => SkinStyle.Ghast,
             "nicolaia" => SkinStyle.Nicolaia,
+            "galgo" => SkinStyle.Galgo,
             _ => SkinStyle.Claud,
         };
 
