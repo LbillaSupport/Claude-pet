@@ -67,10 +67,6 @@ internal static class Program
                 engine.Shutdown();
             }
 
-            // If a newer build was downloaded this session, swap it in now (on exit) and
-            // relaunch — a running exe can't overwrite itself, so this is the safe moment.
-            updater.ApplyStagedUpdateOnExit();
-
             return 0;
         }
         catch (Exception ex)

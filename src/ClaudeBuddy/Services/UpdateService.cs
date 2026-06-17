@@ -1,19 +1,22 @@
-using ClaudeBuddy.Settings;
 using Velopack;
 using Velopack.Sources;
+using ClaudeBuddy.Settings;
 
 namespace ClaudeBuddy.Services;
 
 /// <summary>
 /// Keeps Claude Buddy up to date from GitHub Releases using Velopack (the modern
 /// successor to Squirrel). The app is installed by a generated <c>Setup.exe</c>; this
-/// service then checks the same GitHub repo for newer releases and applies them silently.
+/// service then checks the same GitHub repo for newer releases and applies them.
 ///
 /// On startup (in the background) it asks the configured GitHub repo for the latest
-/// Velopack release. If one is newer than the running build it downloads the delta and
-/// stages it; the swap + relaunch is performed by Velopack on the next exit (a running
-/// exe can't overwrite itself). Everything is best-effort: no network, a non-Velopack
-/// build (e.g. a plain dev run), or any error simply means "no update this run".
+/// Velopack release. If one is newer than the running build it downloads it and then
+/// <b>applies it and restarts straight away</b> — a brief, one-time relaunch into the new
+/// version. We don't wait for a clean exit because users routinely just kill the process
+/// or shut down the PC, which would otherwise strand the staged update forever.
+///
+/// Everything is best-effort: no network, a non-Velopack build (e.g. a plain dev run from
+/// Visual Studio / the bin folder), or any error simply means "no update this run".
 ///
 /// IMPORTANT: <c>VelopackApp.Build().Run()</c> must be called once at the very top of
 /// Main (see Program.cs) for install/update hooks to work.
@@ -24,14 +27,12 @@ public sealed class UpdateService
     private const string RepoUrl = "https://github.com/LbillaSupport/Claude-pet";
 
     private readonly ISettingsService _settings;
-    private UpdateInfo? _staged;
-    private UpdateManager? _manager;
 
     public UpdateService(ISettingsService settings) => _settings = settings;
 
     /// <summary>
     /// Kicks off a background check. Returns immediately. If a newer release exists it is
-    /// downloaded and staged to be applied on exit (<see cref="ApplyStagedUpdateOnExit"/>).
+    /// downloaded and applied, then the app relaunches itself into the new version.
     /// </summary>
     public void StartBackgroundCheck()
     {
@@ -44,7 +45,7 @@ public sealed class UpdateService
         {
             try
             {
-                await CheckAndStageAsync().ConfigureAwait(false);
+                await CheckAndApplyAsync().ConfigureAwait(false);
             }
             catch
             {
@@ -53,29 +54,7 @@ public sealed class UpdateService
         });
     }
 
-    /// <summary>
-    /// If a newer build was downloaded this session, applies it now (on exit) and
-    /// relaunches. Called from the engine shutdown path.
-    /// </summary>
-    public void ApplyStagedUpdateOnExit()
-    {
-        if (_manager is null || _staged is null)
-        {
-            return;
-        }
-
-        try
-        {
-            // Swaps in the new version and restarts the app for the user.
-            _manager.ApplyUpdatesAndRestart(_staged);
-        }
-        catch
-        {
-            // If the swap can't run we just try again next session — never worse off.
-        }
-    }
-
-    private async Task CheckAndStageAsync()
+    private async Task CheckAndApplyAsync()
     {
         var manager = new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
 
@@ -93,7 +72,8 @@ public sealed class UpdateService
 
         await manager.DownloadUpdatesAsync(info).ConfigureAwait(false);
 
-        _manager = manager;
-        _staged = info; // applied on exit by ApplyStagedUpdateOnExit
+        // Swap in the new version and relaunch now. This terminates the current process,
+        // so it's the last thing we do. (A future refinement could prompt the user first.)
+        manager.ApplyUpdatesAndRestart(info);
     }
 }
