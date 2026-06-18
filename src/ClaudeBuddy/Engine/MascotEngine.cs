@@ -42,6 +42,7 @@ public sealed class MascotEngine
     private readonly CursorTracker _cursor;
     private readonly KeyboardActivityTracker _keyboard;
     private readonly SessionUsageService _usage;
+    private readonly WorldDataService _worldData;
     private readonly UsageHudRenderer _hud;
     private readonly SkinManager _skins;
     private readonly ModManager _mods;
@@ -63,8 +64,19 @@ public sealed class MascotEngine
     private double _pendingClickTime;
     private Vector2 _pressScreen;
     private Vector2 _grabOffset;
-    private Vector2 _dragVelocity;
     private double _doubleClickSeconds = 0.5;
+
+    // "Living drag" reaction state (soft grab, spin, dizziness, personality).
+    private float _helicopterTimer;       // seconds spent spinning fast enough for spirals
+    private bool _resistArmed = true;     // re-armed each time it leaves an edge
+    private float _resistTimer;           // >0 while playfully refusing to be dragged off an edge
+    private float _panicTimer;            // >0 while clinging to the cursor just before a fast throw
+    private Vector2 _panicThrowVel;       // the throw to apply when the panic beat ends
+    private float _abuseMeter;            // rises with rough handling, decays; triggers personality
+    private int _lastPersonalityLine = -1;
+    private float _refuseTimer;           // >0 while sulking / refusing to move
+    private bool _dizzyShowing;           // a dizzy reaction is currently playing
+    private float _impactCooldown;        // debounces collision reactions so a bounce-storm can't lag
 
     private bool _photoMode;
     private bool _claudeWasRunning;
@@ -87,6 +99,15 @@ public sealed class MascotEngine
     private float _usageMoodAcc;
     private float _renewedFlash;
 
+    // "World data" (weather/dollar/crypto) reaction state. The buddy is deliberately
+    // chatty: a first weather reaction within seconds of launch, then a data/fact bubble
+    // every ~half-minute — lively without being spammy.
+    private float _weatherReactCooldown = 8f;
+    private WeatherMood _lastWeather = WeatherMood.Unknown;
+    private float _factCooldown = 15f;
+    private int _factIndex;
+    private string _celebratedHoliday = string.Empty; // last holiday we celebrated
+
     // Short reactions and mid-air moves that "type along" must not interrupt.
     private static readonly HashSet<string> TypingNonInterruptible = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -101,7 +122,7 @@ public sealed class MascotEngine
         EmotionState emotion, DailyRoutine routine, ParticleSystem particles,
         ParticleRenderer particleRenderer, CharacterArtist artist, CursorTracker cursor,
         KeyboardActivityTracker keyboard, SessionUsageService usage, UsageHudRenderer hud,
-        SkinManager skins, ModManager mods,
+        WorldDataService worldData, SkinManager skins, ModManager mods,
         IClaudeLauncher claude, IStartupService startup,
         IAudioService audio, AchievementService achievements, ContextMenu menu, Rng rng, GameTime time)
     {
@@ -120,6 +141,7 @@ public sealed class MascotEngine
         _cursor = cursor;
         _keyboard = keyboard;
         _usage = usage;
+        _worldData = worldData;
         _hud = hud;
         _skins = skins;
         _mods = mods;
@@ -158,6 +180,7 @@ public sealed class MascotEngine
         _behavior.BehaviorStarted += OnBehaviorStarted;
         _behavior.BehaviorClimax += OnBehaviorClimax;
         _physics.Landed += OnLanded;
+        _physics.Impact += OnImpact;
         _achievements.Unlocked += OnAchievementUnlocked;
 
         _window.SetTopmost(S.AlwaysOnTop);
@@ -177,6 +200,12 @@ public sealed class MascotEngine
             _usage.Start();
         }
 
+        // Fetch fun real-world data (weather/dollar/crypto) for reactions (opt-out).
+        if (S.WorldData)
+        {
+            _worldData.Start();
+        }
+
         // First hello.
         Trigger("greet");
     }
@@ -191,6 +220,7 @@ public sealed class MascotEngine
         _keyboard.Update(dt);
         _animator.SetTypingIntensity(_keyboard.Intensity);
         UpdateUsageReactions(dt);
+        UpdateWorldDataReactions(dt);
         RoutineProfile routine = _routine.Evaluate();
 
         // --- Interaction timing -----------------------------------------
@@ -215,22 +245,34 @@ public sealed class MascotEngine
             OpenClaude();
         }
 
-        bool simulate = !_photoMode && !_dragging;
+        // The "living drag" reactions (dizziness, helicopter, panic-fling, personality).
+        UpdateDragReactions(dt);
+
+        // While grabbed OR clinging for a panic beat, physics still runs (the spring moves
+        // the body) but the behaviour brain is parked. "Refuse to move" also parks the
+        // brain for a beat while leaving physics on. Photo mode freezes everything.
+        bool held = _dragging || _panicTimer > 0f;
+        bool brainAwake = !_photoMode && !held && _refuseTimer <= 0f;
+        bool physicsAwake = !_photoMode;
 
         // --- Startle on a fast flick of the mouse -----------------------
         _surpriseCd = MathF.Max(0f, _surpriseCd - dt);
-        if (simulate && _surpriseCd <= 0f && _cursor.Speed > EngineConstants.SurpriseCursorSpeed * dpi)
+        if (brainAwake && _surpriseCd <= 0f && _cursor.Speed > EngineConstants.SurpriseCursorSpeed * dpi)
         {
             _surpriseCd = 3.5f;
             Trigger("surprised");
         }
 
         // --- Core simulation --------------------------------------------
-        if (simulate)
+        if (brainAwake)
         {
             _behavior.Update(_mascot, _world, _emotion, routine, _cursor.Position, dt, S.BehaviorFrequency);
-            _physics.Step(_mascot, _world, dt, _behavior.ControlsLocomotion);
             UpdateTypingReaction();
+        }
+
+        if (physicsAwake)
+        {
+            _physics.Step(_mascot, _world, dt, _behavior.ControlsLocomotion);
         }
 
         _emotion.Update(dt, routine);
@@ -238,8 +280,9 @@ public sealed class MascotEngine
             S.AnimationSpeed * MathUtil.Lerp(0.8f, 1.15f, _emotion.Energy), 0.4f, 2.4f);
 
         (float lookX, float lookY) = ComputeEyeLook(dpi);
-        if (simulate)
+        if (physicsAwake)
         {
+            _animator.SetDizziness(_mascot.Dizziness);
             _animator.Update(_mascot, _emotion, dt, lookX, lookY);
             _particles.Update(dt);
             UpdateWeather(dt);
@@ -269,6 +312,7 @@ public sealed class MascotEngine
     {
         _keyboard.Stop();
         _usage.Stop();
+        _worldData.Stop();
         PersistAndSave();
     }
 
@@ -302,6 +346,15 @@ public sealed class MascotEngine
         }
         bool rotated = MathF.Abs(_renderSurfaceAngle) > 1e-3f;
 
+        // The "living drag" free-body tilt (grab/throw spin) pivots about the BODY CENTRE
+        // so the rotated body always stays inside the 480px canvas (pivoting about the
+        // off-centre grab point would swing parts of the body out of frame and clip them).
+        // The "hang from where you grabbed" feel comes from the tilt itself plus the feet
+        // position, not from moving the pivot. It's a separate channel from the surface
+        // rotation; the two never both fire (a drag forces Surface = Floor → angle eases to 0).
+        bool dragRotated = MathF.Abs(_mascot.BodyAngle) > 1e-3f;
+        var bodyPivot = new SKPoint(feet.X, feet.Y - (0.46f * height));
+
         _renderer.Render(_window.Handle, winX, winY, 255, canvas2D =>
         {
             if (rotated)
@@ -312,8 +365,21 @@ public sealed class MascotEngine
                 canvas2D.Translate(-feet.X, -feet.Y);
             }
 
+            if (dragRotated)
+            {
+                canvas2D.Save();
+                canvas2D.Translate(bodyPivot.X, bodyPivot.Y);
+                canvas2D.RotateRadians(_mascot.BodyAngle); // pivot about the body centre
+                canvas2D.Translate(-bodyPivot.X, -bodyPivot.Y);
+            }
+
             _artist.Draw(canvas2D, feet, groundCanvasY, height, _mascot.Facing,
                 _mascot.SquashX, _mascot.SquashY, _animator.Current, _skins.Current.Palette, dpi);
+
+            if (dragRotated)
+            {
+                canvas2D.Restore();
+            }
 
             if (rotated)
             {
@@ -330,18 +396,20 @@ public sealed class MascotEngine
 
     private void DrawUsageHud(SKCanvas canvas2D, SKPoint feet, float height, float dpi, int canvasSize)
     {
-        if (!S.ShowBattery)
+        UsageSnapshot u = _usage.Current;
+        // The battery only shows with a live Claude session AND the toggle on.
+        bool showBattery = S.ShowBattery && u.Available && u.HasActiveSession;
+        // Speech bubbles (battery comments AND world-data lines) show whenever either
+        // feature is on — they must NOT depend on the battery being visible.
+        bool bubbleActive = !string.IsNullOrEmpty(_bubble) && BubbleAlpha() > 0f;
+
+        if (!showBattery && !bubbleActive)
         {
             return;
         }
 
-        UsageSnapshot u = _usage.Current;
-        // Only show the battery when a Claude session is actually live.
-        bool showBattery = u.Available && u.HasActiveSession;
-
-        // Place it just beyond the head along the body's current "up" direction so it
-        // tracks the crab onto walls/ceilings without ever clipping off-screen. The
-        // headroom is per-skin so tall headgear (Nicolaia's top hat) pushes it higher.
+        // The BATTERY tracks the body's "up" direction so it rides onto walls/ceilings
+        // alongside the crab (headroom is per-skin to clear tall hats).
         float ang = _renderSurfaceAngle;
         float headroom = _skins.Current.Palette.HudHeadroom;
         var up = new SKPoint(MathF.Sin(ang), -MathF.Cos(ang));
@@ -353,8 +421,20 @@ public sealed class MascotEngine
             _hud.DrawBattery(canvas2D, head, dpi, u.Remaining, _renewedFlash > 0f, pulse);
         }
 
-        var tail = new SKPoint(head.X, head.Y - (15f * dpi));
-        _hud.DrawBubble(canvas2D, tail, dpi, _bubble, BubbleAlpha(), canvasSize);
+        if (bubbleActive)
+        {
+            // The bubble (drawn screen-upright, growing UPWARD from its tail) must sit
+            // above the body IN SCREEN SPACE regardless of orientation — otherwise, when
+            // the crab clings sideways or upside-down, the up-vector anchor lands beside/
+            // under the body and the bubble overlaps it. So anchor the tail at the body's
+            // topmost screen point: the higher of the feet and the rotated head, minus a
+            // clearance roughly equal to the body's on-screen half-extent.
+            float clearance = (height * 0.6f) + (15f * dpi);
+            float topY = MathF.Min(feet.Y, head.Y) - clearance;
+            float anchorX = MathUtil.Clamp((feet.X + head.X) * 0.5f, 0f, canvasSize);
+            var tail = new SKPoint(anchorX, topY);
+            _hud.DrawBubble(canvas2D, tail, dpi, _bubble, BubbleAlpha(), canvasSize);
+        }
     }
 
     // ===================================================================
@@ -367,6 +447,14 @@ public sealed class MascotEngine
         _dragging = false;
         _pressScreen = new Vector2(x, y);
         _grabOffset = _mascot.Position - _pressScreen;
+
+        // Remember WHERE on the body we took hold, in body-local design units (un-rotated
+        // and DPI-normalised), so the grab spring can hang the crab from that exact point
+        // — a corner, a leg, the head — instead of always from the centre.
+        Vector2 worldOffset = _pressScreen - _mascot.Position;        // feet → grab point (world)
+        Vector2 local = worldOffset.Rotate(-_mascot.BodyAngle);       // undo the current tilt
+        _mascot.GrabLocalOffset = local / MathF.Max(0.5f, _window.DpiScale);
+
         _emotion.Nudge(Mood.Happy, 0.5f, 0.6f); // a click makes it smile
     }
 
@@ -382,18 +470,234 @@ public sealed class MascotEngine
         if (_dragging)
         {
             _dragging = false;
-            PhysicsSystem.Throw(_mascot, _dragVelocity);
-            if (_dragVelocity.Length > 600f)
+            _resistTimer = 0f;
+            _animator.SetDragSpeed(0f);
+
+            // Throw with the body's OWN smoothed velocity (built up by the follow in
+            // StepDrag), not the raw, noisy cursor velocity — that's stable and already
+            // clamped, so a flick throws cleanly instead of rocketing off-screen.
+            Vector2 throwVel = _mascot.Velocity;
+
+            // On a really fast fling it occasionally clings to the cursor for a panicky
+            // beat — wide eyes, legs stretched toward the mouse — before it loses grip and
+            // flies off. Otherwise it's thrown straight away.
+            if (throwVel.Length > 1500f && _rng.Chance(0.4f))
             {
-                _particles.EmitDust(new Vector2(_mascot.Position.X, _world.GroundY));
+                _panicTimer = 0.18f;
+                _panicThrowVel = throwVel;
+                _mascot.Animation = AnimationState.Surprised;
+                _emotion.Nudge(Mood.Surprised, 1f, 0.6f);
+                // Keep it grabbed (frozen on the spring) until the panic beat elapses.
+                return;
             }
 
+            ReleaseThrow(throwVel);
             return;
         }
 
         // Not a drag: defer the "open Claude" action so a double-click can cancel it.
         _pendingClick = true;
         _pendingClickTime = _time.Total;
+    }
+
+    /// <summary>Lets go of the grab and flings the mascot, keeping its built-up spin.</summary>
+    private void ReleaseThrow(Vector2 releaseVelocity)
+    {
+        PhysicsSystem.Throw(_mascot, releaseVelocity);
+        if (releaseVelocity.Length > 600f)
+        {
+            _particles.EmitDust(new Vector2(_mascot.Position.X, _world.GroundY));
+        }
+    }
+
+    // ===================================================================
+    //  "Living drag" — dizziness, helicopter, panic-fling, personality
+    // ===================================================================
+
+    private static readonly string[] AbuseLines =
+        { "...", "¿Otra vez?", "¿En serio?", "Ya basta...", "Me mareo...", "Uff, basta", "Pará un poco" };
+
+    private void UpdateDragReactions(float dt)
+    {
+        // --- Panic cling: a beat of holding the cursor before a fast fling lets go. ---
+        if (_panicTimer > 0f)
+        {
+            _panicTimer -= dt;
+            if (_panicTimer <= 0f)
+            {
+                ReleaseThrow(_panicThrowVel);
+            }
+        }
+
+        _refuseTimer = MathF.Max(0f, _refuseTimer - dt);
+        _resistTimer = MathF.Max(0f, _resistTimer - dt);
+        _impactCooldown = MathF.Max(0f, _impactCooldown - dt);
+        _abuseMeter = MathF.Max(0f, _abuseMeter - (dt * 0.18f)); // slowly forgives
+
+        // --- Helicopter: sustained fast spin makes the eyes spiral and banks up dizziness. ---
+        if (MathF.Abs(_mascot.AngularVelocity) > EngineConstants.HelicopterAngularVel)
+        {
+            _helicopterTimer += dt;
+            _mascot.Dizziness = MathUtil.Clamp01(_mascot.Dizziness + (dt * 0.6f));
+        }
+        else
+        {
+            _helicopterTimer = MathF.Max(0f, _helicopterTimer - dt);
+        }
+
+        // --- Dizziness from any fast spin (dragged or flung), recovering otherwise. ---
+        float spin = MathF.Abs(_mascot.AngularVelocity);
+        if (spin > EngineConstants.AngularRestThreshold)
+        {
+            _mascot.Dizziness = MathUtil.Clamp01(
+                _mascot.Dizziness + (dt * EngineConstants.DizzySpinPerSecond * (spin / EngineConstants.DragMaxAngularVel)));
+        }
+
+        // Only recover once on the ground, settled, and not being whirled around.
+        if (!_dragging && _mascot.OnGround && spin < EngineConstants.AngularRestThreshold)
+        {
+            _mascot.Dizziness = MathF.Max(0f, _mascot.Dizziness - (dt * EngineConstants.DizzyRecoveryPerSecond));
+        }
+
+        // --- Trigger / clear the dizzy reaction as the meter crosses its threshold. ---
+        if (!_dizzyShowing && _mascot.Dizziness >= EngineConstants.DizzyTriggerThreshold
+            && _mascot.OnGround && !_dragging && _panicTimer <= 0f)
+        {
+            _dizzyShowing = true;
+            Trigger("dizzy");
+            _particles.EmitStars(HeadWorld(), 8);
+        }
+        else if (_dizzyShowing && (_mascot.Dizziness < 0.2f || !_behavior.IsRunning("dizzy")))
+        {
+            _dizzyShowing = false;
+        }
+    }
+
+    /// <summary>
+    /// Every collision (floor/wall/ceiling) lands here with its speed. The speed band
+    /// picks the reaction — a tap blinks, a slam pancakes — and rough handling builds the
+    /// "abuse" meter that triggers a grumpy personality response.
+    /// </summary>
+    private void OnImpact(ImpactEvent e)
+    {
+        float speed = e.Speed;
+
+        if (speed < EngineConstants.ImpactTinySpeed)
+        {
+            // Barely a bump: a tiny squash + a startled blink, nothing more.
+            _mascot.Squash(1.06f, 0.95f);
+            return;
+        }
+
+        // Debounce: a fast bounce can re-hit the same wall several frames running. Without
+        // this each re-hit would emit a fresh particle burst → the pool fills and the
+        // (linear) "recycle oldest" search runs hundreds of times a frame → a visible lag
+        // spike. One reaction per bounce keeps it cheap and reads better anyway.
+        if (_impactCooldown > 0f)
+        {
+            return;
+        }
+
+        _impactCooldown = EngineConstants.ImpactReactionCooldown;
+        Vector2 head = HeadWorld();
+
+        if (speed < EngineConstants.ImpactMediumSpeed)
+        {
+            // A noticeable knock: a few stars, a small recoil and a surprised flash.
+            _particles.EmitStars(head, 4);
+            RecoilFrom(e.Surface, 0.18f);
+            _emotion.Nudge(Mood.Surprised, 0.5f, 0.8f);
+            _mascot.Dizziness = MathUtil.Clamp01(_mascot.Dizziness + 0.12f);
+            return;
+        }
+
+        if (speed < EngineConstants.ImpactHeavySpeed)
+        {
+            // A real whack: flattened squash, dust, recoil, and a chunk of dizziness. It
+            // rebounds instantly (the squash sells the hit) — no freeze, which read as lag.
+            _particles.EmitStars(head, 7);
+            _particles.EmitDust(new Vector2(e.At.X, _world.GroundY), 5);
+            ApplyImpactSquash(e.Surface, 0.32f);
+            RecoilFrom(e.Surface, 0.28f);
+            _emotion.Nudge(Mood.Surprised, 0.8f, 1f);
+            _mascot.Dizziness = MathUtil.Clamp01(_mascot.Dizziness + EngineConstants.DizzyImpactHeavyBoost);
+            BumpAbuse(0.35f);
+            return;
+        }
+
+        // Extreme slam: a dramatic pancake, "birds" (stars + magic) around the head, and a
+        // guaranteed bout of dizziness — but it still bounces off at once (no freeze-frame).
+        _particles.EmitStars(head, 12);
+        _particles.EmitMagic(head, 8);
+        _particles.EmitDust(new Vector2(e.At.X, _world.GroundY), 9);
+        ApplyImpactSquash(e.Surface, 0.55f);
+        RecoilFrom(e.Surface, 0.35f);
+        _emotion.Nudge(Mood.Scared, 1f, 1.4f);
+        _mascot.Dizziness = 1f;
+        BumpAbuse(0.6f);
+    }
+
+    /// <summary>Pushes the mascot back off the surface it just hit (a cartoon recoil).</summary>
+    private void RecoilFrom(ImpactSurface surface, float fraction)
+    {
+        Vector2 v = _mascot.Velocity;
+        switch (surface)
+        {
+            case ImpactSurface.LeftWall: v = v.WithX(MathF.Abs(v.X) * fraction + 40f); break;
+            case ImpactSurface.RightWall: v = v.WithX(-MathF.Abs(v.X) * fraction - 40f); break;
+            case ImpactSurface.Ceiling: v = v.WithY(MathF.Abs(v.Y) * fraction + 40f); break;
+            default: break; // floor recoil is handled by the existing bounce
+        }
+
+        _mascot.Velocity = v;
+    }
+
+    /// <summary>Squashes the body against the surface it hit (flat on the floor, thin on a wall).</summary>
+    private void ApplyImpactSquash(ImpactSurface surface, float amount)
+    {
+        if (surface is ImpactSurface.LeftWall or ImpactSurface.RightWall)
+        {
+            _mascot.Squash(1f - amount, 1f + (amount * 0.7f)); // squeezed thin sideways
+        }
+        else
+        {
+            _mascot.Squash(1f + amount, 1f - amount);          // flattened (pancake)
+        }
+    }
+
+    /// <summary>
+    /// Records rough handling. When it boils over, the crab shows some attitude: a grumpy
+    /// face + Spanish bubble, and sometimes a flat refusal to move for a couple of seconds.
+    /// </summary>
+    private void BumpAbuse(float amount)
+    {
+        _abuseMeter += amount;
+        if (_abuseMeter < 1f)
+        {
+            return;
+        }
+
+        _abuseMeter = 0f;
+
+        // Pick a line that isn't the one we used last time.
+        int line;
+        do
+        {
+            line = _rng.Range(0, AbuseLines.Length);
+        }
+        while (AbuseLines.Length > 1 && line == _lastPersonalityLine);
+        _lastPersonalityLine = line;
+
+        ShowBubble(AbuseLines[line], 2.6f);
+        _emotion.Nudge(_rng.Chance(0.5f) ? Mood.Sad : Mood.Scared, 0.8f, 2f);
+
+        // Sometimes it sulks: plants itself and refuses to be steered for a beat.
+        if (_rng.Chance(0.45f))
+        {
+            _refuseTimer = _rng.Range(1.4f, 2.4f);
+            _mascot.Velocity = Vector2.Zero;
+            _mascot.Animation = AnimationState.Sad;
+        }
     }
 
     private void OnDoubleClick(int x, int y)
@@ -443,18 +747,49 @@ public sealed class MascotEngine
             _emotion.Nudge(Mood.Surprised, 0.7f);
         }
 
-        if (_dragging)
+        if (!_dragging)
         {
-            Vector2 p = cur + _grabOffset;
-            float half = _mascot.HalfWidthPx(dpi);
-            p = new Vector2(
-                _world.ClampX(p.X, half),
-                MathUtil.Clamp(p.Y, _world.VirtualBounds.Top + 10, _world.GroundY));
-            _mascot.Position = p;
-            _mascot.OnGround = false;
-            _mascot.Animation = AnimationState.Dragged;
-            _dragVelocity = _cursor.Velocity;
+            return;
         }
+
+        // The physics layer now owns the motion: it eases the GRABBED point toward the
+        // cursor (stable, no gluing) and derives the body's own velocity for the throw.
+        _mascot.Animation = AnimationState.Dragged;
+
+        // Drag speed (0..1) drives how furiously the legs paddle in the air.
+        float dragNorm = MathUtil.Clamp01(_cursor.Speed / (1400f * dpi));
+        _animator.SetDragSpeed(dragNorm);
+
+        // Playful edge resistance: as it's hauled toward a monitor edge it sometimes
+        // braces and refuses for a beat (the spring target is held back from the edge so
+        // it dramatically stretches), then yields. Randomised, re-armed when it leaves.
+        float half = _mascot.HalfWidthPx(dpi);
+        float edgePad = half + (40f * dpi);
+        bool nearEdge = cur.X < _world.LeftWall + edgePad || cur.X > _world.RightWall - edgePad
+                     || cur.Y < _world.CeilingY + edgePad;
+
+        if (_resistTimer > 0f)
+        {
+            // Brace: pin the spring target just shy of the edge so the body stretches taut.
+            Vector2 braced = new(
+                MathUtil.Clamp(cur.X, _world.LeftWall + edgePad, _world.RightWall - edgePad),
+                MathF.Max(cur.Y, _world.CeilingY + edgePad));
+            _physics.DragTarget = braced;
+            return;
+        }
+
+        if (nearEdge && _resistArmed && _rng.Chance(EngineConstants.EdgeResistChance))
+        {
+            _resistArmed = false;
+            _resistTimer = _rng.Range(0.7f, 1.1f);
+            _emotion.Nudge(Mood.Scared, 0.5f, 1f);
+        }
+        else if (!nearEdge)
+        {
+            _resistArmed = true; // moved away from the edge → can resist again next time
+        }
+
+        _physics.DragTarget = cur;
     }
 
     // ===================================================================
@@ -623,6 +958,148 @@ public sealed class MascotEngine
         _bubbleElapsed = 0f;
     }
 
+    // ===================================================================
+    //  "World data" reactions — weather, dollar, crypto, fun facts
+    // ===================================================================
+
+    private static readonly string[] FunFacts =
+    {
+        "¿Sabías? Los pulpos tienen tres corazones.",
+        "Un día en Venus dura más que su año.",
+        "La miel nunca se echa a perder.",
+        "Los flamencos son rosados por lo que comen.",
+        "El 80% del cerebro es agua.",
+        "Las nutrias se toman de la mano al dormir.",
+        "Un rayo es más caliente que la superficie del Sol.",
+        "Los gatos no sienten el sabor dulce.",
+    };
+
+    private void UpdateWorldDataReactions(float dt)
+    {
+        if (!S.WorldData)
+        {
+            return;
+        }
+
+        bool canReact = !_photoMode && !_dragging && _mascot.OnGround;
+        WorldDataSnapshot w = _worldData.Current;
+
+        // --- Holiday: celebrate once when today's holiday first becomes known. Wait
+        //     until the crab is on the ground (not climbing/airborne) so the confetti +
+        //     jump actually land; only mark it done once we truly celebrate. ---
+        if (!string.IsNullOrEmpty(w.TodayHoliday) && w.TodayHoliday != _celebratedHoliday && canReact)
+        {
+            _celebratedHoliday = w.TodayHoliday;
+            ShowBubble($"¡Feliz {w.TodayHoliday}!", 6f);
+            Trigger("celebrate");
+            _particles.EmitConfetti(HeadWorld());
+            _particles.EmitStars(HeadWorld(), 10);
+            _audio.Play("celebrate");
+            _emotion.Nudge(Mood.Excited, 1f, 2.5f);
+            return; // don't pile a weather/data bubble on top of the celebration
+        }
+
+        // --- Weather: react when the weather mood changes, then occasionally ---
+        _weatherReactCooldown -= dt;
+        if (w.HasWeather && canReact && _weatherReactCooldown <= 0f)
+        {
+            bool changed = w.Weather != _lastWeather;
+            // React promptly on a change, otherwise just every few minutes.
+            if (changed || _weatherReactCooldown <= -1f)
+            {
+                _lastWeather = w.Weather;
+                _weatherReactCooldown = _rng.Range(90f, 150f); // re-react every ~2 min
+                ReactToWeather(w);
+            }
+        }
+
+        // --- Fun data bubbles: rotate facts / dollar / crypto / greeting ------
+        _factCooldown -= dt;
+        if (_factCooldown <= 0f)
+        {
+            _factCooldown = _rng.Range(35f, 55f); // a fresh line roughly every ~45s
+            if (_bubbleElapsed >= _bubbleRemaining) // don't talk over another bubble
+            {
+                ShowBubble(NextDataLine(w), 5f);
+            }
+        }
+    }
+
+    private void ReactToWeather(WorldDataSnapshot w)
+    {
+        int t = (int)Math.Round(w.TemperatureC);
+        switch (w.Weather)
+        {
+            case WeatherMood.Cold:
+                Trigger("shiver");
+                ShowBubble($"Brrr... {t}°, ¡qué frío!", 5f);
+                _emotion.Nudge(Mood.Sad, 0.4f, 2f);
+                break;
+            case WeatherMood.Hot:
+                Trigger("too-hot");
+                ShowBubble($"Uf, {t}°... me derrito.", 5f);
+                _emotion.Nudge(Mood.Lazy, 0.5f, 2f);
+                break;
+            case WeatherMood.Rain:
+                Trigger("rainy");
+                ShowBubble("Está lloviendo afuera...", 5f);
+                break;
+            case WeatherMood.Snow:
+                Trigger("shiver");
+                _particles.EmitSparkles(HeadWorld(), 12);
+                ShowBubble("¡Está nevando!", 5f);
+                break;
+            case WeatherMood.Cool:
+                Trigger("shiver");
+                ShowBubble($"Fresquito, {t}°...", 5f);
+                break;
+            case WeatherMood.Warm:
+                ShowBubble($"Lindo día, {t}°.", 4f);
+                _emotion.Nudge(Mood.Happy, 0.3f);
+                break;
+            default:
+                ShowBubble($"Afuera hay {t}°.", 4f);
+                break;
+        }
+    }
+
+    private string NextDataLine(WorldDataSnapshot w)
+    {
+        // Rotate through the available data sources so it's varied.
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            switch (_factIndex++ % 4)
+            {
+                case 0:
+                    return GreetingLine();
+                case 1:
+                    if (w.HasDollar) return $"Dólar blue: ${w.DollarBlue}";
+                    break;
+                case 2:
+                    if (w.HasCrypto) return $"Bitcoin: U$D {w.BtcUsd:N0}";
+                    break;
+                default:
+                    return Pick(FunFacts);
+            }
+        }
+
+        return Pick(FunFacts);
+    }
+
+    private string GreetingLine()
+    {
+        int hour = DateTime.Now.Hour;
+        string day = DateTime.Now.DayOfWeek == DayOfWeek.Friday ? " ¡Feliz viernes!" : string.Empty;
+        string part = hour switch
+        {
+            < 6 => "¿Tan tarde despierto?",
+            < 12 => "¡Buen día!",
+            < 19 => "¡Buenas tardes!",
+            _ => "¡Buenas noches!",
+        };
+        return part + day;
+    }
+
     private float BubbleAlpha()
     {
         if (string.IsNullOrEmpty(_bubble) || _bubbleElapsed >= _bubbleRemaining)
@@ -708,6 +1185,7 @@ public sealed class MascotEngine
             LaunchOnStartup = S.LaunchOnStartup,
             PhotoMode = _photoMode,
             ShowBattery = S.ShowBattery,
+            WorldData = S.WorldData,
             AnimationSpeed = S.AnimationSpeed,
             Volume = S.Volume,
             BehaviorFrequency = S.BehaviorFrequency,
@@ -759,6 +1237,20 @@ public sealed class MascotEngine
                 {
                     _usage.Stop();
                     _bubble = string.Empty; // clear any battery bubble immediately
+                }
+
+                break;
+            case MenuCommand.ToggleWorldData:
+                S.WorldData = !S.WorldData;
+                if (S.WorldData)
+                {
+                    _worldData.Start(); // resume polling free public APIs
+                }
+                else
+                {
+                    _worldData.Stop();
+                    _lastWeather = WeatherMood.Unknown;
+                    _bubble = string.Empty;
                 }
 
                 break;
@@ -1015,6 +1507,11 @@ public sealed class MascotEngine
         _mascot.OnGround = true;
         _mascot.Surface = Surface.Floor;
         _mascot.RenderAngleOverride = null;
+        // Clear all "living drag" state so a reset always lands upright and clear-headed.
+        _mascot.BodyAngle = 0f;
+        _mascot.AngularVelocity = 0f;
+        _mascot.Dizziness = 0f;
+        _mascot.GrabLocalOffset = Vector2.Zero;
     }
 
     private void PersistAndSave()

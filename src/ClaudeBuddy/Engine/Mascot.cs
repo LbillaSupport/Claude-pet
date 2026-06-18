@@ -22,6 +22,32 @@ public sealed class Mascot
 
     public bool BeingDragged { get; set; }
 
+    // ---- "Living drag" — soft grab, free rotation & dizziness ------------
+    // While grabbed the body is sprung to the cursor from a *local* grab point (so it
+    // hangs from wherever you took hold), and it carries a real body angle + angular
+    // velocity that survive the throw and settle back to upright over time.
+
+    /// <summary>The body-local point the user grabbed, relative to the feet, BEFORE any
+    /// rotation (x: +right, y: +down). Lets the body hang from a corner/leg, not the
+    /// centre. Zero = grabbed dead-centre at the feet.</summary>
+    public Vector2 GrabLocalOffset { get; set; }
+
+    /// <summary>Free-body rotation (radians) for grab/throw spin; 0 = upright. Kept apart
+    /// from <see cref="SurfaceAngle"/> (wall/ceiling) so crab-climbing is untouched.</summary>
+    public float BodyAngle { get; set; }
+
+    /// <summary>Body spin rate (rad/s). Preserved through a throw for spinning flight,
+    /// then damped; near upright &amp; grounded it springs back to 0.</summary>
+    public float AngularVelocity { get; set; }
+
+    /// <summary>Motion-sickness meter (0..1). Built up by hard spins and impacts, recovers
+    /// over time; crossing a threshold triggers the dizzy reaction (spiral eyes, wobble).</summary>
+    public float Dizziness { get; set; }
+
+    /// <summary>True while the body is rotated off-upright by a grab/throw (drives the
+    /// renderer to pivot about the grab point instead of the feet).</summary>
+    public bool DragRotated => MathF.Abs(BodyAngle) > 1e-3f || MathF.Abs(AngularVelocity) > 1e-3f;
+
     /// <summary>Which screen edge the crab is clinging to (Floor = normal gravity).</summary>
     public Surface Surface { get; set; } = Surface.Floor;
 

@@ -32,12 +32,15 @@ internal static class Program
         // hooks here and exits before the app proper starts. No-op for a plain dev run.
         VelopackApp.Build().Run();
 
-        // QA / marketing helper: `ClaudeBuddy --render <skinId> <out.png> [sizePx]` draws a
-        // single skin to a centred PNG and exits — no window, no wandering. Lets us verify a
-        // skin's look deterministically (the mascot never walks out of frame).
+        // QA / marketing helper: `ClaudeBuddy --render <skinId> <out.png> [sizePx] [prop]`
+        // draws a single skin to a centred PNG and exits — no window, no wandering. `prop`
+        // can be "thermometer" or "fan" to preview the weather props. Lets us verify a
+        // skin/prop's look deterministically (the mascot never walks out of frame).
         if (args.Length >= 3 && args[0] == "--render")
         {
-            return RenderSkinToFile(args[1], args[2], args.Length >= 4 ? int.Parse(args[3]) : 512);
+            int sz = args.Length >= 4 && int.TryParse(args[3], out int n) ? n : 512;
+            string prop = args.Length >= 5 ? args[4] : string.Empty;
+            return RenderSkinToFile(args[1], args[2], sz, prop);
         }
 
         using var mutex = new Mutex(initiallyOwned: true, "ClaudeBuddy.SingleInstance.v1", out bool isNew);
@@ -123,6 +126,7 @@ internal static class Program
         // Services.
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<SessionUsageService>();
+        services.AddSingleton<WorldDataService>();
         services.AddSingleton<UpdateService>();
         services.AddSingleton<IClaudeLauncher, ClaudeLauncher>();
         services.AddSingleton<IStartupService, StartupService>();
@@ -139,7 +143,7 @@ internal static class Program
     /// Renders one skin to a centred PNG and returns 0/1. Used by the `--render` CLI mode
     /// to verify a skin's appearance without launching the live (wandering) mascot.
     /// </summary>
-    private static int RenderSkinToFile(string skinId, string outPath, int size)
+    private static int RenderSkinToFile(string skinId, string outPath, int size, string prop = "")
     {
         try
         {
@@ -148,7 +152,29 @@ internal static class Program
             skins.SetCurrent(skinId);
 
             var artist = new CharacterArtist();
-            var pose = new Pose { MouthCurve = 0.7f, MouthOpen = 0.2f };
+            Pose pose;
+
+            // If `prop` names an AnimationState, run the real Animator for ~1s so we capture
+            // the exact live pose (e.g. Shiver/Hot). Otherwise just draw a neutral pose,
+            // optionally forcing a weather prop on.
+            if (Enum.TryParse<AnimationState>(prop, ignoreCase: true, out AnimationState state))
+            {
+                var animator = new Animator(new Core.Rng());
+                var mascot = new ClaudeBuddy.Engine.Mascot { Animation = state };
+                var emotion = new ClaudeBuddy.Emotions.EmotionState();
+                for (int i = 0; i < 90; i++) // ~1.5s at 60fps to settle the blend
+                {
+                    animator.Update(mascot, emotion, 1f / 60f, lookX: 0f, lookY: 0f);
+                }
+
+                pose = animator.Current;
+            }
+            else
+            {
+                pose = new Pose { MouthCurve = 0.7f, MouthOpen = 0.2f };
+                if (prop == "thermometer") { pose.ThermometerProp = 1f; pose.ArmLeft = 1.7f; pose.ArmRight = 1.7f; }
+                else if (prop == "fan") { pose.FanProp = 1f; pose.ArmRight = 1.6f; }
+            }
 
             var info = new SkiaSharp.SKImageInfo(size, size, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
             using SkiaSharp.SKSurface surface = SkiaSharp.SKSurface.Create(info);

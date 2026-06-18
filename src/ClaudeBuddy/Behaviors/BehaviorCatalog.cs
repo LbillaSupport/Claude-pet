@@ -124,5 +124,15 @@ public sealed class BehaviorCatalog
         new() { Id = "wake", DisplayName = "Wake Up", Animation = AnimationState.WakeUp, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 1.2f, MaxDuration = 1.2f, Cooldown = 0f, Mood = Mood.Surprised },
         new() { Id = "greet", DisplayName = "Hello!", Animation = AnimationState.Wave, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 2.2f, MaxDuration = 2.2f, Cooldown = 0f, Mood = Mood.Happy, MoodIntensity = 0.8f, EnterParticle = ParticleKind.Sparkle, EnterSound = "happy" },
         new() { Id = "type-along", DisplayName = "Type Along", Animation = AnimationState.TypeAlong, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 1.5f, MaxDuration = 1.5f, Cooldown = 0f, Mood = Mood.Excited, MoodIntensity = 0.5f },
+
+        // ---- Weather reactions (weight 0: triggered by WorldDataService) ------
+        new() { Id = "shiver", DisplayName = "Brrr, It's Cold", Animation = AnimationState.Shiver, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 4f, MaxDuration = 6f, Cooldown = 0f, Mood = Mood.Sad, MoodIntensity = 0.5f },
+        new() { Id = "too-hot", DisplayName = "Too Hot", Animation = AnimationState.Hot, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 4f, MaxDuration = 6f, Cooldown = 0f, Mood = Mood.Lazy, MoodIntensity = 0.6f },
+        new() { Id = "rainy", DisplayName = "Rainy Day", Animation = AnimationState.Idle, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 5f, MaxDuration = 7f, Cooldown = 0f, Mood = Mood.Content, EnterParticle = ParticleKind.Snow },
+
+        // ---- Drag reactions (weight 0: triggered by the interaction layer) ----
+        // After a hard spin or a heavy collision the crab gets woozy: spiral eyes, a
+        // lolling head and a stumble that eases out as the dizziness meter recovers.
+        new() { Id = "dizzy", DisplayName = "Dizzy", Animation = AnimationState.Dizzy, Category = BehaviorCategory.Special, Weight = 0f, MinDuration = 2.4f, MaxDuration = 3.4f, Cooldown = 0f, Mood = Mood.Confused, MoodIntensity = 0.8f, EnterParticle = ParticleKind.Star, EnterSound = "yawn" },
     ];
 }

@@ -296,6 +296,29 @@ the level (kept for a possible future read-out). Battery is **hidden unless `Has
 Toggle via the right-click menu (`MenuCommand.ToggleBattery` → `AppSettings.ShowBattery`),
 which also Start()/Stop()s the log reader. `Rendering/UsageHudRenderer` unchanged (green/amber/red).
 
+## World data — weather/dollar/crypto reactions (`Services/WorldDataService`)
+
+Pulls fun real-world data from **free, key-less public APIs** so the buddy reacts to it,
+and chats about it in speech bubbles. Background thread, slow polling, all best-effort.
+- **Sources:** location from `ip-api.com` (approx city/lat-lon from public IP) → weather
+  from **Open-Meteo** (no key); ARS blue dollar from `dolarapi.com`; BTC from CoinGecko.
+  Weather refreshed every 30 min, rates every 15 min. Thread-safe `Current` `WorldDataSnapshot`.
+- **Privacy + gating:** only an approximate city is derived, nothing is sent out. Gated by
+  `AppSettings.WorldData` (default true; menu toggle `MenuCommand.ToggleWorldData` →
+  Start()/Stop()). Off = **zero network requests**.
+- **Reactions** (`MascotEngine.UpdateWorldDataReactions`): `WeatherMood` → Cold triggers the
+  `shiver` behaviour (`AnimationState.Shiver`: hug + tremble + chattering, `Blush`, and the
+  icy `ThermometerProp`); Hot → `too-hot` (`AnimationState.Hot`: droop + sweat + fast fanning
+  arm + `FanProp`); Rain/Snow → bubble (+ sparkles for snow). Plus rotating data bubbles:
+  greeting (by hour, "¡Feliz viernes!"), `Dólar blue: $…`, `Bitcoin: U$D …`, and a fun-facts
+  pool — all Spanish, **no emoji** (Skia software raster won't colour-render them).
+- **New poses/props:** `AnimationState.Shiver`/`Hot` in `Animator.BuildTarget`;
+  `Pose.ThermometerProp`/`FanProp` (added to `CopyFrom`+`Blend`) drawn by
+  `CharacterArtist.DrawThermometer` (glass tube + icy bulb + snowflakes) / `DrawFan` (folding
+  hand-fan wedge). Weather behaviours `shiver`/`too-hot`/`rainy` are weight-0 (engine-triggered).
+- **`--render` preview:** `ClaudeBuddy --render <skin> <out.png> [size] [thermometer|fan]`
+  forces the weather prop on so they can be screenshotted deterministically.
+
 ## Epic moves
 
 - `backflip` behaviour: a big `PhysicsSystem.Jump` then `AnimationState.Spin` while airborne
@@ -341,6 +364,72 @@ floats by the crab, plus mood-driven speech bubbles.
   `WindowId` increments; low battery nudges Sleepy/Lazy mood. Phrases are Spanish string pools
   in `MascotEngine`. Toggle with `AppSettings.ShowBattery` (gates both the log-reading and the
   draw). First read seeds baselines so it never "celebrates" at launch.
+
+## "Living drag" — soft grab, free rotation, dizziness & impacts
+
+Dragging is a **third locomotion mode** alongside Floor (gravity) and Climbing. Instead of
+gluing `Position` to the cursor, the body **eases** toward it **from the local point you
+grabbed**, carries a free-body rotation, and hands linear + angular velocity to gravity on
+release — so it feels like handling a tiny, stubborn, soft creature (Pixar/Shimeji/Goose).
+
+- **Stability is the rule.** An early version used a stiff explicit spring; it exploded on a
+  slow frame → the body teleported, tunnelled walls and vanished. The shipped solve uses an
+  **unconditionally-stable exponential ease** (`MathUtil.Damp`, frame-rate independent) — it
+  can never blow up regardless of frame timing. If you touch `StepDrag`, keep that property.
+- **Mascot drag state** (`Engine/Mascot.cs`, pure data): `GrabLocalOffset` (body-local, DPI-
+  normalised grab point so it hangs from a corner/leg), `BodyAngle` + `AngularVelocity` (a
+  dedicated free-body rotation channel, **separate** from `SurfaceAngle` and `Pose.WholeBodyRotation`
+  so crab-climbing is untouched), `Dizziness` (0..1 meter), `DragRotated`. **`ResetPosition`
+  clears all of these.**
+- **The solve** (`PhysicsSystem.StepDrag`): eases the feet toward the position that puts the
+  grabbed point on `PhysicsSystem.DragTarget` (the engine sets it = cursor each frame), then
+  **derives** the body's own velocity from the real per-frame displacement (smoothed + clamped
+  to `MaxThrowSpeed`) so a flick throws cleanly. A gentle, clamped tilt (`DragTiltScale` /
+  `DragMaxTilt`) makes it hang from the grab point — **not** the old runaway torque. `SettleAngle`
+  (Floor branch) keeps the spin during flight and springs `BodyAngle` back to upright once
+  grounded & slow — **never a snap**. On release the throw uses the body's smoothed velocity,
+  and `Throw` leaves `AngularVelocity` alone (spinning flight).
+- **No freeze-frame on impact.** A "bonk" stun-timer was tried and **removed** — at speed it
+  read as the pet *lagging/sticking* to the wall (confirmed by a frame-time log: FPS never
+  dropped; it was the deliberate pause). Impacts now rebound instantly; the squash + particles
+  sell the hit.
+- **Collisions** raise `PhysicsSystem.Impact` (`ImpactEvent{Surface,Speed,At}` in
+  `Physics/ImpactEvent.cs`) at floor/wall/ceiling. `MascotEngine.OnImpact` maps `Speed` to bands
+  (`Impact*Speed`): tiny→squash, medium→stars+recoil+surprised, heavy→pancake+dust+dizziness,
+  extreme→full pancake + "birds". `RecoilFrom`/`ApplyImpactSquash` shape it per surface. A
+  **debounce** (`ImpactReactionCooldown`, one reaction per ~0.25 s) stops a fast bounce that
+  re-hits the same wall from flooding particles. (`Landed` is kept for the old dust hook.)
+- **Dizziness** (`MascotEngine.UpdateDragReactions`) accumulates from fast spin + heavy impacts,
+  recovers when grounded/settled; crossing `DizzyTriggerThreshold` forces the weight-0 `dizzy`
+  behaviour → `AnimationState.Dizzy` (spiral eyes via new `Pose.SpiralEyes`; wobbling head; the
+  Animator also laces an unstable-walk wobble onto any walk while `Dizziness` is high). **`SpiralEyes`
+  is a new Pose field → it's in `CopyFrom` AND `Blend`.**
+- **Spiral eyes are universal.** `Pose.SpiralEyes > 0.5` shows the dizzy `@`-spiral on **every**
+  skin: `CharacterArtist.DrawSpiralEye` (one eye) + `DrawDizzyPair` (both), called as an early
+  override inside `DrawEye` (Claud/Nicolaia), `DrawCreeperFace`, `DrawGhastFace`, and the Galgo
+  windshield eyes. Add the same check to any new face.
+- **Frame gating:** while held (dragging or the pre-throw panic beat) **physics + animator still
+  run** (the ease moves the body) but the **behaviour brain is parked**; "refuse to move"
+  (`_refuseTimer`) parks the brain too. Photo mode freezes everything. The render adds **one** new
+  pivot: when `BodyAngle != 0` it rotates the artist about the **body centre** (not the grab point
+  — pivoting off-centre swung parts of the body out of the 480px canvas and clipped them). It
+  composes with, but never co-fires with, the surface-angle pivot (a drag forces `Surface=Floor`).
+- **Personality / flourishes** (`MascotEngine`): `_abuseMeter` rises with rough handling → grumpy
+  face + a Spanish bubble (`AbuseLines`, no emoji) + sometimes a `_refuseTimer` sulk; edge-resistance
+  (`EdgeResistChance`); helicopter spirals at `HelicopterAngularVel`; an occasional panic-cling
+  before a very fast fling (`_panicTimer` delays the `Throw`). `Animator.SetDragSpeed` paddles the
+  legs in mid-air.
+- **All tunables** live under `// ---- Drag & impact ----` in `EngineConstants.cs` (`DragFollow`,
+  tilt, angular caps, dizzy curve, impact speed bands, `ImpactReactionCooldown`).
+- **Verify the dizzy look deterministically:** `ClaudeBuddy --render <skin> out.png 420 Dizzy`
+  (the `--render` CLI runs the real Animator for the named `AnimationState`).
+
+## The app is silent (no audio)
+
+The user asked for no sound, so `Services/AudioService.Play` is a **deliberate no-op** kept behind
+`IAudioService` (rather than ripping every `_audio.Play(...)` call out of the engine) — re-enabling
+sound later is a one-file change. The right-click menu has **no Mute/Volume** entries (they'd be dead
+controls); `AppSettings.Muted`/`Volume` still exist but are unused.
 
 ## Drag "stuck to cursor" fix
 

@@ -61,6 +61,9 @@ public sealed class Pose
     /// <summary>Eyes drawn as sparkly stars when near 1 (excited / rare reaction).</summary>
     public float StarEyes;
 
+    /// <summary>Eyes drawn as dizzy spinning spirals when near 1 (after a hard spin/hit).</summary>
+    public float SpiralEyes;
+
     /// <summary>Whole-character opacity for fades.</summary>
     public float Alpha = 1f;
 
@@ -70,6 +73,8 @@ public sealed class Pose
     public float BookProp;       // 0..1 visibility of the book
     public float ThinkBubble;    // 0..1 thought bubble
     public float SleepBubble;    // 0..1 Zzz bubble near head
+    public float ThermometerProp; // 0..1 icy thermometer (cold weather reaction)
+    public float FanProp;        // 0..1 hand fan (hot weather reaction)
 
     /// <summary>Copies another pose's values into this instance (no allocation).</summary>
     public void CopyFrom(Pose other)
@@ -93,11 +98,14 @@ public sealed class Pose
         StrideAmount = other.StrideAmount;
         HappyEyes = other.HappyEyes;
         StarEyes = other.StarEyes;
+        SpiralEyes = other.SpiralEyes;
         Alpha = other.Alpha;
         CoffeeProp = other.CoffeeProp;
         UmbrellaProp = other.UmbrellaProp;
         BookProp = other.BookProp;
         ThinkBubble = other.ThinkBubble;
         SleepBubble = other.SleepBubble;
+        ThermometerProp = other.ThermometerProp;
+        FanProp = other.FanProp;
     }
 }

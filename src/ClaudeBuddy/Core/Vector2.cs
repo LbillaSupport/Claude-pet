@@ -42,6 +42,19 @@ public readonly struct Vector2 : IEquatable<Vector2>
     public static float Distance(Vector2 a, Vector2 b) => (a - b).Length;
     public static float Dot(Vector2 a, Vector2 b) => (a.X * b.X) + (a.Y * b.Y);
 
+    /// <summary>2D cross (perp-dot) — the signed area / Z of a×b. Used as the torque a
+    /// pull applies about a lever arm when the grab point is off the body centre.</summary>
+    public static float Cross(Vector2 a, Vector2 b) => (a.X * b.Y) - (a.Y * b.X);
+
+    /// <summary>Rotates this vector by <paramref name="radians"/> (screen space: +Y down,
+    /// so a positive angle turns clockwise). Maps the body-local grab point into world.</summary>
+    public Vector2 Rotate(float radians)
+    {
+        float c = MathF.Cos(radians);
+        float s = MathF.Sin(radians);
+        return new Vector2((X * c) - (Y * s), (X * s) + (Y * c));
+    }
+
     public static Vector2 Lerp(Vector2 a, Vector2 b, float t) =>
         new(a.X + ((b.X - a.X) * t), a.Y + ((b.Y - a.Y) * t));
 

@@ -28,8 +28,17 @@ Claude Buddy isn't a looping sprite — it's a tiny simulation:
   its face, its walk, its animation speed and what it chooses to do.
 - **It notices you.** Its eyes follow your cursor, it gets startled by fast mouse
   flicks, smiles when clicked, and can be picked up and thrown with real momentum.
+- **Grabbing it is alive.** Pick it up and it dangles from *exactly* where you grabbed
+  it on a soft spring — lagging, stretching, paddling its legs in the air. Drag in a
+  circle and it spins like a helicopter; fling it and it flies off spinning, bonks into
+  walls and the ceiling, lands with a squashy pancake, and gets dizzy (spiral eyes!) if
+  you whirl it too hard. Manhandle it enough and it gets grumpy and refuses to move.
 - **Affection that matters.** Petting fills a happiness meter that unlocks rare
   reactions, secret dances and sparkly eyes.
+- **It reacts to the real world.** With *World Data* on, it checks the live weather and
+  shivers with an icy thermometer when it's cold, fans itself when it's hot, and drops
+  speech bubbles with the forecast, the ARS blue-dollar, the BTC price and fun facts —
+  all from free public APIs (toggle it off for a fully offline buddy).
 - **Buttery motion.** Everything runs at 60 FPS with easing on every transition,
   squash-&-stretch landings, soft shadows and tiny particles. Nothing moves in a
   straight line.
@@ -58,8 +67,8 @@ always in the **Change Skin** menu:
 | --- | --- |
 | **Single click** | Open Claude Desktop (celebrates when it appears!) |
 | **Double click** | Pet the mascot — hearts, blush and a happy wiggle |
-| **Click & drag** | Pick it up; release with a flick to throw it |
-| **Right click** | Open the full menu (skins, speed, volume, startup, photo mode…) |
+| **Click & drag** | Pick it up — it hangs and stretches from where you grabbed it; whirl it to spin it, flick to throw it (spinning!) |
+| **Right click** | Open the full menu (skins, speed, behaviour frequency, startup, photo mode…) |
 | **Move mouse fast** | Startle it |
 
 ## ⬇️ Install (no coding needed)

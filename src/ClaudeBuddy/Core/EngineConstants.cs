@@ -57,6 +57,64 @@ public static class EngineConstants
 
     public const float MaxThrowSpeed = 2600f;
 
+    // ---- Drag & impact ("living drag") -----------------------------------
+    // The grab follows the cursor with a touch of lag and tilts to hang from the point
+    // you took hold of — but the model is an unconditionally-stable exponential ease, not
+    // a stiff spring, so it can never explode (no teleporting / vanishing) regardless of
+    // frame timing. Tuned for cartoon weight, not realism: soft, snappy, expressive.
+
+    /// <summary>How quickly the held point chases the cursor (per second). Higher = tighter
+    /// follow with less lag; this is a frame-rate-independent ease so it's always stable.</summary>
+    public const float DragFollow = 26f;
+
+    /// <summary>How strongly an off-centre, fast pull tilts the body to hang from the grab
+    /// point (radians of target lean per unit of lever×pull).</summary>
+    public const float DragTiltScale = 0.0009f;
+
+    /// <summary>Hard cap on the hang tilt while dragging (radians).</summary>
+    public const float DragMaxTilt = 1.2f;
+
+    /// <summary>How fast the body eases toward its hang-tilt target (per second).</summary>
+    public const float DragTiltStiffness = 9f;
+
+    /// <summary>Hard cap on spin speed (rad/s) so it can't blur out.</summary>
+    public const float DragMaxAngularVel = 18f;
+
+    /// <summary>Spin settle after release (per second) — never an instant snap.</summary>
+    public const float AngularReleaseDamping = 1.7f;
+
+    /// <summary>Once grounded &amp; slow, how firmly the body rights itself to upright.</summary>
+    public const float AngularRestStiffness = 9f;
+
+    /// <summary>|AngularVelocity| (rad/s) under which a grounded body starts righting up.</summary>
+    public const float AngularRestThreshold = 4.5f;
+
+    /// <summary>How much of the body's stretch maps to the grab-direction squash (0..~).</summary>
+    public const float DragSquashScale = 0.0016f;
+
+    // Dizziness: a 0..1 meter that accumulates from spins and hard impacts and slowly
+    // recovers. Tiny impacts add almost nothing; heavy ones add a lot (soft curve).
+    public const float DizzyRecoveryPerSecond = 0.22f;
+    public const float DizzyTriggerThreshold = 0.85f;   // crossing this triggers the dizzy reaction
+    public const float DizzySpinPerSecond = 0.20f;      // gained per second of fast spinning
+    public const float DizzyImpactHeavyBoost = 0.55f;   // a heavy hit's contribution at the soft cap
+
+    /// <summary>Spin speed (rad/s) that turns the eyes into helicopter spirals.</summary>
+    public const float HelicopterAngularVel = 15f;
+
+    /// <summary>Chance the crab playfully resists when dragged into a screen edge.</summary>
+    public const float EdgeResistChance = 0.5f;
+
+    // Collision speed bands (px/s) that select the reaction (blink → pancake).
+    public const float ImpactTinySpeed = 260f;
+    public const float ImpactMediumSpeed = 620f;
+    public const float ImpactHeavySpeed = 1200f;
+    public const float ImpactPancakeSpeed = 1900f;
+
+    /// <summary>Minimum time (s) between collision reactions, so a fast bounce that re-hits
+    /// the same wall several frames running fires ONE reaction, not a particle storm.</summary>
+    public const float ImpactReactionCooldown = 0.25f;
+
     // ---- Behaviour -------------------------------------------------------
 
     /// <summary>Base seconds between autonomous behaviour re-evaluations.</summary>

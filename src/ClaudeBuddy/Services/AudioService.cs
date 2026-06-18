@@ -1,50 +1,30 @@
 using ClaudeBuddy.Settings;
-using ClaudeBuddy.Utilities;
 
 namespace ClaudeBuddy.Services;
 
-/// <summary>Plays the mascot's tiny sound effects, honouring the mute/volume settings.</summary>
+/// <summary>Plays the mascot's sound effects. Currently a silent no-op (see below).</summary>
 public interface IAudioService
 {
-    /// <summary>Plays a named effect (e.g. "pet", "jump") if a matching wav exists.</summary>
+    /// <summary>Plays a named effect (e.g. "pet", "jump"). No-op while the app is silent.</summary>
     void Play(string key);
 }
 
 /// <summary>
-/// A deliberately tiny audio layer built on <c>winmm</c> PlaySound, so there are no
-/// extra dependencies. Effects are loaded from <c>Assets/Audio/{key}.wav</c>; if a
-/// file is missing the call is a silent no-op (SND_NODEFAULT prevents the system
-/// "ding"), which means the app ships and runs perfectly even before any audio art
-/// is added. Mute is honoured immediately.
+/// Claude Buddy is intentionally silent — the user asked for no sound, and a quiet
+/// desktop pet is the wholesome default. This is a no-op implementation kept behind the
+/// <see cref="IAudioService"/> seam (rather than ripping every <c>_audio.Play(...)</c>
+/// call out of the engine) so re-enabling sound later is a one-file change.
 /// </summary>
 public sealed class AudioService : IAudioService
 {
-    private readonly ISettingsService _settings;
-    private readonly string _audioRoot;
-
     public AudioService(ISettingsService settings)
     {
-        _settings = settings;
-        _audioRoot = Path.Combine(AppContext.BaseDirectory, "Assets", "Audio");
+        // Settings are unused while silent; the constructor signature is kept for DI.
+        _ = settings;
     }
 
+    /// <summary>No-op: the app makes no sound.</summary>
     public void Play(string key)
     {
-        AppSettings s = _settings.Current;
-        if (s.Muted || s.Volume <= 0.001f || string.IsNullOrWhiteSpace(key))
-        {
-            return;
-        }
-
-        string path = Path.Combine(_audioRoot, key + ".wav");
-        if (!File.Exists(path))
-        {
-            return;
-        }
-
-        // Async + no-default keeps playback off the simulation thread and silent on miss.
-        NativeMethods.PlaySound(
-            path, IntPtr.Zero,
-            NativeMethods.SND_ASYNC | NativeMethods.SND_FILENAME | NativeMethods.SND_NODEFAULT);
     }
 }

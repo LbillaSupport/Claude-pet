@@ -56,6 +56,14 @@ public sealed class AppSettings
     public bool ShowBattery { get; set; } = true;
 
     /// <summary>
+    /// Fetch fun real-world data (weather, ARS blue dollar, BTC) from free public APIs so
+    /// the mascot can react (shiver when it's cold, etc.) and chat about it. Touches the
+    /// internet; turn off for a fully offline buddy. Only an approximate city is derived
+    /// from your IP and nothing is ever sent out — see <c>Services/WorldDataService</c>.
+    /// </summary>
+    public bool WorldData { get; set; } = true;
+
+    /// <summary>
     /// Token budget for the rolling 5-hour session window. 0 = auto-calibrate from your
     /// own historical peak usage (see <see cref="ObservedMaxSessionTokens"/>). Set a real
     /// number if you know your plan's limit and want the battery to track it exactly.

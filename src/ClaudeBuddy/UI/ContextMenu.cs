@@ -14,6 +14,7 @@ public sealed class MenuState
     public bool LaunchOnStartup { get; init; }
     public bool PhotoMode { get; init; }
     public bool ShowBattery { get; init; }
+    public bool WorldData { get; init; }
     public float AnimationSpeed { get; init; } = 1f;
     public float Volume { get; init; } = 0.7f;
     public float BehaviorFrequency { get; init; } = 1f;
@@ -38,7 +39,6 @@ public sealed class ContextMenu
     private const uint FreqBase = 1300;
 
     private static readonly float[] SpeedPresets = { 0.5f, 0.75f, 1f, 1.5f, 2f };
-    private static readonly float[] VolumePresets = { 0f, 0.25f, 0.5f, 0.75f, 1f };
     private static readonly float[] FreqPresets = { 0.5f, 1f, 1.5f, 2f };
     private static readonly string[] FreqNames = { "Calm", "Normal", "Lively", "Hyper" };
 
@@ -55,14 +55,14 @@ public sealed class ContextMenu
             AppendSub(menu, "Change Skin", BuildSkinMenu(state, subMenus));
             AppendSub(menu, "Animation Speed", BuildPresetMenu(SpeedBase, SpeedPresets, state.AnimationSpeed, v => $"{v:0.##}x", subMenus));
             AppendSub(menu, "Behaviour Frequency", BuildFreqMenu(state, subMenus));
-            AppendSub(menu, "Volume", BuildVolumeMenu(state, subMenus));
-            Check(menu, MenuCommand.ToggleMute, "Mute", state.Muted);
+            // No Volume / Mute entries: the app is silent by design (no audio).
             Separator(menu);
 
             Check(menu, MenuCommand.ToggleAlwaysOnTop, "Always On Top", state.AlwaysOnTop);
             Check(menu, MenuCommand.ToggleLaunchOnStartup, "Launch On Startup", state.LaunchOnStartup);
             Check(menu, MenuCommand.PhotoMode, "Photo Mode", state.PhotoMode);
             Check(menu, MenuCommand.ToggleBattery, "Show Session Battery", state.ShowBattery);
+            Check(menu, MenuCommand.ToggleWorldData, "World Data (weather, etc.)", state.WorldData);
             Add(menu, MenuCommand.ResetPosition, "Reset Position");
             Separator(menu);
 
@@ -115,11 +115,6 @@ public sealed class ContextMenu
             return new MenuSelection(MenuCommand.AnimationSpeed, Value: SpeedPresets[(int)(id - SpeedBase)]);
         }
 
-        if (id is >= VolumeBase and < FreqBase)
-        {
-            return new MenuSelection(MenuCommand.Volume, Value: VolumePresets[(int)(id - VolumeBase)]);
-        }
-
         if (id is >= FreqBase and < FreqBase + 100)
         {
             return new MenuSelection(MenuCommand.BehaviorFrequency, Value: FreqPresets[(int)(id - FreqBase)]);
@@ -165,20 +160,6 @@ public sealed class ContextMenu
         {
             uint flags = NativeMethods.MF_STRING | (i == nearest ? NativeMethods.MF_CHECKED : 0);
             NativeMethods.AppendMenu(sub, flags, (UIntPtr)(FreqBase + (uint)i), FreqNames[i]);
-        }
-
-        return sub;
-    }
-
-    private static IntPtr BuildVolumeMenu(MenuState state, List<IntPtr> owned)
-    {
-        IntPtr sub = NativeMethods.CreatePopupMenu();
-        owned.Add(sub);
-        int nearest = NearestIndex(VolumePresets, state.Volume);
-        for (int i = 0; i < VolumePresets.Length; i++)
-        {
-            uint flags = NativeMethods.MF_STRING | (i == nearest && !state.Muted ? NativeMethods.MF_CHECKED : 0);
-            NativeMethods.AppendMenu(sub, flags, (UIntPtr)(VolumeBase + (uint)i), $"{(int)(VolumePresets[i] * 100)}%");
         }
 
         return sub;

@@ -24,6 +24,8 @@ public sealed class Animator
     private float _blinkProgress = 1f; // 1 = fully open
     private bool _blinking;
     private float _typingIntensity; // 0..1, how fast the user is currently typing
+    private float _dragSpeed;       // 0..1, how fast it's being dragged (paddles the legs)
+    private float _dizziness;       // 0..1, current motion-sickness (adds an unsteady wobble)
 
     // Springy squash/stretch — gives landings and pose changes a little organic
     // overshoot instead of an easing-only "glide" that can feel mechanical.
@@ -44,6 +46,18 @@ public sealed class Animator
     /// pose can tap faster and bounce harder the quicker the user types.
     /// </summary>
     public void SetTypingIntensity(float intensity) => _typingIntensity = MathUtil.Clamp01(intensity);
+
+    /// <summary>
+    /// Feeds how fast the mascot is currently being dragged (0 = still, 1 = whipped around)
+    /// so the <c>Dragged</c> pose paddles its legs in the air — the faster the flail.
+    /// </summary>
+    public void SetDragSpeed(float speed01) => _dragSpeed = MathUtil.Clamp01(speed01);
+
+    /// <summary>
+    /// Feeds the current dizziness (0..1) so a woozy crab walks with an unsteady wobble and
+    /// its eyes can spiral. Set every frame from <see cref="Engine.Mascot.Dizziness"/>.
+    /// </summary>
+    public void SetDizziness(float dizziness01) => _dizziness = MathUtil.Clamp01(dizziness01);
 
     /// <summary>
     /// Advances the animator. <paramref name="lookX"/>/<paramref name="lookY"/> are the
@@ -105,12 +119,15 @@ public sealed class Animator
         t.LegPhase = 0f;
         t.HappyEyes = 0f;
         t.StarEyes = 0f;
+        t.SpiralEyes = 0f;
         t.Alpha = 1f;
         t.CoffeeProp = 0f;
         t.UmbrellaProp = 0f;
         t.BookProp = 0f;
         t.ThinkBubble = 0f;
         t.SleepBubble = 0f;
+        t.ThermometerProp = 0f;
+        t.FanProp = 0f;
 
         float p = _phase;
 
@@ -322,15 +339,37 @@ public sealed class Animator
                 break;
 
             case AnimationState.Dragged:
-                t.ArmLeft = 2.3f;
-                t.ArmRight = 2.3f;
-                t.StrideAmount = 0.6f;
-                t.LegPhase = MathF.Sin(p * 4f);
-                t.MouthOpen = 0.3f;
-                t.EyeOpen = 1.1f;
-                t.BrowAngle = 0.3f;
-                t.EyeLookY = -0.3f;
+            {
+                // Dangling from the cursor: the legs instinctively paddle the air, faster
+                // the harder it's whisked around, and the face widens with the speed. The
+                // body's actual rotation is driven by physics (BodyAngle), not here.
+                float flail = 6f + (16f * _dragSpeed);
+                t.LegPhase = _stateTime * flail;
+                t.StrideAmount = 0.9f + (1.1f * _dragSpeed); // big running-in-air kick
+                t.ArmLeft = 1.6f + (0.7f * _dragSpeed);      // reaching/grabbing for the cursor
+                t.ArmRight = 1.6f + (0.7f * _dragSpeed);
+                t.MouthOpen = 0.2f + (0.4f * _dragSpeed);
+                t.EyeOpen = 1.05f + (0.3f * _dragSpeed);
+                t.BrowAngle = 0.3f + (0.5f * _dragSpeed);    // wide-eyed at high speed
+                t.EyeLookY = -0.2f;
                 break;
+            }
+
+            case AnimationState.Dizzy:
+            {
+                // Wooziness: spiral eyes, a lolling head, and a little stumble-sway. The
+                // intensity tracks the live dizziness meter so it eases out as it recovers.
+                float woozy = MathF.Max(0.35f, _dizziness);
+                t.SpiralEyes = 1f;
+                t.HeadTilt = MathF.Sin(_stateTime * 3.2f) * 0.22f * woozy;
+                t.BodyLean = MathF.Sin(_stateTime * 2.3f) * 0.16f * woozy;
+                t.BodyOffset = new Vector2(MathF.Sin(_stateTime * 4.1f) * 4f * woozy, 2f);
+                t.MouthOpen = 0.25f;
+                t.MouthCurve = -0.15f;
+                t.BrowAngle = -0.25f;
+                t.EyeOpen = 0.9f;
+                break;
+            }
 
             case AnimationState.LookUp:
                 t.EyeLookY = -1f;
@@ -498,6 +537,41 @@ public sealed class Animator
                 t.Blush = 0.1f;
                 break;
             }
+
+            case AnimationState.Shiver:
+            {
+                // Brrr: hunch down, hug inward (arms up across the body), and tremble with
+                // a fast jitter. An icy thermometer floats beside the head.
+                float tremble = MathF.Sin(_stateTime * 38f) * 1.6f;
+                t.BodyOffset = new Vector2(tremble, 3f); // crouched + buzzing
+                t.BodyScaleX = 1.06f;
+                t.BodyScaleY = 0.94f;                    // squished, tense
+                t.ArmLeft = 1.7f;                        // hug self (raised inner arms)
+                t.ArmRight = 1.7f;
+                t.HeadTilt = MathF.Sin(_stateTime * 9f) * 0.05f;
+                t.BrowAngle = -0.4f;                     // worried
+                t.EyeOpen = 0.8f;
+                t.MouthOpen = 0.2f + (0.1f * MathF.Abs(MathF.Sin(_stateTime * 19f))); // chattering
+                t.MouthCurve = -0.2f;
+                t.Blush = 0.5f;                          // cold cheeks
+                t.ThermometerProp = 1f;
+                break;
+            }
+
+            case AnimationState.Hot:
+            {
+                // Phew: droop, sweat, and fan one "hand" briskly back and forth.
+                t.BodyOffset = new Vector2(0f, 2f);
+                t.BodyScaleY = 0.97f;
+                t.HeadTilt = 0.12f + (MathF.Sin(_stateTime * 1.5f) * 0.04f); // languid lean
+                t.ArmRight = 1.5f + (MathF.Sin(_stateTime * 16f) * 0.45f);   // fast fanning
+                t.EyeOpen = 0.7f;
+                t.BrowAngle = -0.2f;
+                t.MouthOpen = 0.3f;                       // panting a little
+                t.MouthCurve = -0.1f;
+                t.FanProp = 1f;
+                break;
+            }
         }
     }
 
@@ -574,6 +648,18 @@ public sealed class Animator
             // High-affection sparkle in the eyes during calm moments.
             _target.StarEyes = MathF.Max(_target.StarEyes, 0.25f);
         }
+
+        // "Unstable walking afterwards": while still dizzy (but no longer in the full Dizzy
+        // pose), lace any walk/idle with an unsteady lean + the odd lurch, easing out as the
+        // meter recovers. Additive, so it rides on top of the real locomotion.
+        if (_dizziness > 0.05f && state != AnimationState.Dizzy)
+        {
+            float w = _dizziness;
+            _target.BodyLean += MathF.Sin(_phase * 3.4f) * 0.12f * w;
+            _target.HeadTilt += MathF.Sin(_phase * 2.1f) * 0.14f * w;
+            _target.BodyOffset = _target.BodyOffset.WithX(_target.BodyOffset.X + (MathF.Sin(_phase * 2.7f) * 3f * w));
+            _target.SpiralEyes = MathF.Max(_target.SpiralEyes, MathUtil.Clamp01((w - 0.5f) * 2f));
+        }
     }
 
     private void FillLegCycle(float frequency, float armSwing, float bob)
@@ -590,7 +676,8 @@ public sealed class Animator
         // Don't override states that deliberately close or widen the eyes.
         bool eyesScripted = state is AnimationState.Sleep or AnimationState.Blink
             or AnimationState.Yawn or AnimationState.Stretch or AnimationState.WakeUp
-            or AnimationState.Pet or AnimationState.Surprised or AnimationState.Scared;
+            or AnimationState.Pet or AnimationState.Surprised or AnimationState.Scared
+            or AnimationState.Dizzy;
 
         _blinkTimer -= dt;
         if (!_blinking && _blinkTimer <= 0f)
@@ -674,11 +761,14 @@ public sealed class Animator
         c.StrideAmount = MathUtil.Damp(c.StrideAmount, t.StrideAmount, 13f, dt);
         c.HappyEyes = MathUtil.Damp(c.HappyEyes, t.HappyEyes, 16f, dt);
         c.StarEyes = MathUtil.Damp(c.StarEyes, t.StarEyes, 13f, dt);
+        c.SpiralEyes = MathUtil.Damp(c.SpiralEyes, t.SpiralEyes, 13f, dt);
         c.Alpha = MathUtil.Damp(c.Alpha, t.Alpha, 10f, dt);
         c.CoffeeProp = MathUtil.Damp(c.CoffeeProp, t.CoffeeProp, 9f, dt);
         c.UmbrellaProp = MathUtil.Damp(c.UmbrellaProp, t.UmbrellaProp, 9f, dt);
         c.BookProp = MathUtil.Damp(c.BookProp, t.BookProp, 9f, dt);
         c.ThinkBubble = MathUtil.Damp(c.ThinkBubble, t.ThinkBubble, 9f, dt);
         c.SleepBubble = MathUtil.Damp(c.SleepBubble, t.SleepBubble, 8f, dt);
+        c.ThermometerProp = MathUtil.Damp(c.ThermometerProp, t.ThermometerProp, 9f, dt);
+        c.FanProp = MathUtil.Damp(c.FanProp, t.FanProp, 9f, dt);
     }
 }

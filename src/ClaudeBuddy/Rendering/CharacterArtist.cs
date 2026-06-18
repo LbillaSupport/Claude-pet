@@ -259,6 +259,12 @@ public sealed class CharacterArtist
             return;
         }
 
+        if (pose.SpiralEyes > 0.5f)
+        {
+            DrawSpiralEye(canvas, ex, ey, half, palette);
+            return;
+        }
+
         if (pose.StarEyes > 0.5f)
         {
             DrawStarEye(canvas, ex, ey, half, palette);
@@ -314,6 +320,47 @@ public sealed class CharacterArtist
         canvas.DrawPath(path, _fill);
     }
 
+    // The classic cartoon "I'm seeing stars" dizzy eye: a little @-shaped spiral. Drawn
+    // as an Archimedean spiral stroke so it reads instantly as woozy.
+    private void DrawSpiralEye(SKCanvas canvas, float ex, float ey, float r, SkinPalette palette)
+    {
+        _stroke.Color = palette.Pupil.ToSk();
+        _stroke.StrokeWidth = r * 0.30f;
+        _stroke.StrokeCap = SKStrokeCap.Round;
+
+        using var path = new SKPath();
+        const int turns = 3;
+        const int steps = turns * 16;
+        float maxR = r * 1.05f;
+        for (int i = 0; i <= steps; i++)
+        {
+            float tt = i / (float)steps;          // 0..1 from centre outward
+            float ang = tt * turns * MathUtil.Tau;
+            float radius = tt * maxR;
+            float x = ex + (MathF.Cos(ang) * radius);
+            float y = ey + (MathF.Sin(ang) * radius);
+            if (i == 0)
+            {
+                path.MoveTo(x, y);
+            }
+            else
+            {
+                path.LineTo(x, y);
+            }
+        }
+
+        canvas.DrawPath(path, _stroke);
+    }
+
+    /// <summary>Draws a pair of dizzy spiral eyes — the universal "I'm woozy" overlay that
+    /// every skin (Claud, Creeper, Ghast, Galgo) shows when <c>pose.SpiralEyes</c> is high,
+    /// so the dizzy reaction reads the same regardless of the face style.</summary>
+    private void DrawDizzyPair(SKCanvas canvas, float eyeX, float eyeY, float half, SkinPalette palette)
+    {
+        DrawSpiralEye(canvas, -eyeX, eyeY, half, palette);
+        DrawSpiralEye(canvas, eyeX, eyeY, half, palette);
+    }
+
     private void DrawBrows(SKCanvas canvas, Pose pose, SkinPalette palette, float eyeX, float eyeY, float s)
     {
         if (MathF.Abs(pose.BrowAngle) < 0.05f || pose.HappyEyes > 0.5f)
@@ -363,6 +410,13 @@ public sealed class CharacterArtist
         float s = 0.2f * h;
         float open = MathUtil.Clamp(pose.EyeOpen, 0.12f, 1.2f);
 
+        // Dizzy overlay (universal): spiral eyes replace the menacing face when woozy.
+        if (pose.SpiralEyes > 0.5f)
+        {
+            DrawDizzyPair(canvas, eyeX, eyeY, s * 0.55f, palette);
+            return;
+        }
+
         _fill.Color = palette.Pupil.ToSk();
 
         // Two square eyes (no glint — keep it menacing). They still blink/track a little.
@@ -411,6 +465,13 @@ public sealed class CharacterArtist
         float eyeX = 0.17f * h;
         float eyeY = -0.62f * h;
         bool agitated = pose.MouthOpen > 0.3f; // shooting / startled
+
+        // Dizzy overlay (universal): spiral eyes replace the sad face when woozy.
+        if (pose.SpiralEyes > 0.5f)
+        {
+            DrawDizzyPair(canvas, eyeX, eyeY, 0.09f * h, palette);
+            return;
+        }
 
         _fill.Color = palette.Pupil.ToSk();
 
@@ -702,12 +763,22 @@ public sealed class CharacterArtist
         float eyeR = 0.10f * h;
         float exL = frontX + (0.14f * h);
         float exR = frontX + (0.30f * h);
+        bool dizzy = pose.SpiralEyes > 0.5f;
         foreach (float ex in new[] { exL, exR })
         {
             _fill.Color = SKColors.White;
             canvas.DrawCircle(ex, eyeCY, eyeR, _fill);
             _stroke.StrokeWidth = 0.01f * h;
+            _stroke.Color = ink;
             canvas.DrawCircle(ex, eyeCY, eyeR, _stroke);
+
+            // Dizzy overlay (universal): a spiral inside the eye instead of a pupil.
+            if (dizzy)
+            {
+                DrawSpiralEye(canvas, ex, eyeCY, eyeR * 0.8f, palette);
+                continue;
+            }
+
             float open = MathUtil.Clamp(pose.EyeOpen, 0.2f, 1.2f);
             float px = ex + (lookX * eyeR * 0.4f);
             float py = eyeCY + (pose.EyeLookY * eyeR * 0.4f) + (eyeR * 0.15f);
@@ -899,6 +970,94 @@ public sealed class CharacterArtist
         if (pose.UmbrellaProp > 0.3f)
         {
             DrawUmbrella(canvas, h, pose.UmbrellaProp, palette);
+        }
+
+        if (pose.ThermometerProp > 0.3f)
+        {
+            DrawThermometer(canvas, h, pose.ThermometerProp);
+        }
+
+        if (pose.FanProp > 0.3f)
+        {
+            DrawFan(canvas, h, pose.FanProp);
+        }
+    }
+
+    private void DrawThermometer(SKCanvas canvas, float h, float a)
+    {
+        // A frosty thermometer floating to the right of the head with a low (cold) level
+        // and a couple of snowflakes — the "it's freezing" cue.
+        byte alpha = (byte)(255 * a);
+        float x = 0.50f * h;
+        float top = -0.92f * h;
+        float bottom = -0.60f * h;
+        float w = 0.05f * h;
+        float bulbR = w * 0.95f;
+
+        // Glass tube.
+        _fill.Color = new SKColor(0xEE, 0xF4, 0xF8, alpha);
+        canvas.DrawRoundRect(new SKRect(x - (w / 2f), top, x + (w / 2f), bottom), w * 0.5f, w * 0.5f, _fill);
+        // Bulb.
+        var icyBlue = new SKColor(0x4F, 0xA8, 0xE0, alpha);
+        _fill.Color = icyBlue;
+        canvas.DrawCircle(x, bottom + (bulbR * 0.4f), bulbR, _fill);
+        // Low mercury (cold) — only fills the bottom third, in icy blue.
+        float fillTop = MathUtil.Lerp(bottom, top, 0.28f);
+        canvas.DrawRoundRect(new SKRect(x - (w * 0.28f), fillTop, x + (w * 0.28f), bottom), w * 0.2f, w * 0.2f, _fill);
+        // Tube outline.
+        _stroke.Color = new SKColor(0x8A, 0xB4, 0xCC, alpha);
+        _stroke.StrokeWidth = h * 0.01f;
+        canvas.DrawRoundRect(new SKRect(x - (w / 2f), top, x + (w / 2f), bottom), w * 0.5f, w * 0.5f, _stroke);
+
+        // Two tiny snowflakes drifting nearby.
+        _stroke.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)(220 * a));
+        _stroke.StrokeWidth = h * 0.009f;
+        DrawSnowflake(canvas, x + (0.10f * h), top + (0.06f * h), 0.035f * h);
+        DrawSnowflake(canvas, x - (0.10f * h), top + (0.16f * h), 0.026f * h);
+    }
+
+    private void DrawSnowflake(SKCanvas canvas, float cx, float cy, float r)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            float ang = i * (MathF.PI / 3f);
+            float dx = MathF.Cos(ang) * r;
+            float dy = MathF.Sin(ang) * r;
+            canvas.DrawLine(cx - dx, cy - dy, cx + dx, cy + dy, _stroke);
+        }
+    }
+
+    private void DrawFan(SKCanvas canvas, float h, float a)
+    {
+        // A folding hand-fan held out to the right, opening from a pivot — drawn as a wedge
+        // of alternating ribs. Pairs with the Hot pose's fanning arm motion.
+        byte alpha = (byte)(255 * a);
+        float px = 0.46f * h;   // pivot near the "hand"
+        float py = -0.46f * h;
+        float radius = 0.22f * h;
+        float startDeg = -120f;
+        float sweepDeg = 80f;
+
+        var rect = new SKRect(px - radius, py - radius, px + radius, py + radius);
+        // Fan leaf.
+        using (var leaf = new SKPath())
+        {
+            leaf.MoveTo(px, py);
+            leaf.ArcTo(rect, startDeg, sweepDeg, false);
+            leaf.Close();
+            _fill.Color = new SKColor(0xFF, 0xE6, 0x9A, alpha);
+            canvas.DrawPath(leaf, _fill);
+            _stroke.Color = new SKColor(0xC9, 0x9A, 0x3A, alpha);
+            _stroke.StrokeWidth = h * 0.01f;
+            canvas.DrawPath(leaf, _stroke);
+        }
+        // Ribs.
+        _stroke.StrokeWidth = h * 0.008f;
+        for (int i = 0; i <= 4; i++)
+        {
+            float deg = startDeg + (sweepDeg * i / 4f);
+            float rad = deg * MathF.PI / 180f;
+            canvas.DrawLine(px, py, px + (MathF.Cos(rad) * radius), py + (MathF.Sin(rad) * radius), _stroke);
         }
     }
 

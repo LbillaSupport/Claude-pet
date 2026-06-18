@@ -125,6 +125,16 @@ public enum AnimationState
 
     /// <summary>A small, happy in-place wiggle/sway — gentler than a full dance.</summary>
     Wiggle,
+
+    /// <summary>Cold: hugs itself and shivers, breath puffs, an icy thermometer floats by.</summary>
+    Shiver,
+
+    /// <summary>Hot: droops, sweats and fans itself.</summary>
+    Hot,
+
+    /// <summary>Dizzy: spiral eyes, a wobbling head and an unsteady stumble after a hard
+    /// spin or collision. Recovers as the dizziness meter drains.</summary>
+    Dizzy,
 }
 
 /// <summary>The visual primitive a particle is rendered as.</summary>
@@ -167,6 +177,7 @@ public enum MenuCommand
     ToggleAlwaysOnTop,
     ToggleLaunchOnStartup,
     ToggleBattery,
+    ToggleWorldData,
     ResetPosition,
     PhotoMode,
     Achievements,
