@@ -47,13 +47,27 @@ src\ClaudeBuddy\bin\Release\net9.0-windows\win-x64\ClaudeBuddy.exe
 ### Distribution & auto-update (Velopack) — verified end-to-end
 Shipping to non-technical users is done with **Velopack** (modern Squirrel successor) —
 NOT a `.bat`/MSI. `VelopackApp.Build().Run()` is the **first line of `Main`** (intercepts
-install/update/uninstall hooks; no-op on a dev run). `Services/UpdateService.cs` checks
-**GitHub Releases** in the background on startup (`GithubSource(RepoUrl)`), and if a newer
-release exists it downloads it and calls **`ApplyUpdatesAndRestart` immediately** — it does
-NOT wait for a clean exit, because a force-kill / PC shutdown would otherwise strand the
-staged update. The app silently relaunches into the new version (no dialog). Gated by
-`AppSettings.AutoUpdate` (default true). `manager.IsInstalled` is false on a plain dev run
-(from `bin\`), so updates only ever happen for an installed copy.
+install/update/uninstall hooks; no-op on a dev run). `Services/UpdateService.cs` polls
+**GitHub Releases** in the background: a first check ~30 s after launch, then **every 4 h**
+for the whole session (`PeriodicTimer`), so a long-running buddy updates without ever being
+relaunched. When a newer release exists it downloads it and calls **`ApplyUpdatesAndRestart`
+immediately** — it does NOT wait for a clean exit, because a force-kill / PC shutdown would
+otherwise strand the staged update. The app silently relaunches into the new version (no
+dialog). Gated by `AppSettings.AutoUpdate` (re-read each round; default true). `Stop()`
+cancels the poller on exit. `manager.IsInstalled` is false on a plain dev run (from `bin\`),
+so updates only ever happen for an installed copy.
+- **User config survives updates:** settings live in `%AppData%\ClaudeBuddy\settings.json`
+  (Roaming), totally separate from the install dir (`%LocalAppData%\ClaudeBuddy\`). Velopack
+  never touches AppData, so updates/reinstalls keep the user's skin/position/achievements; a
+  fresh install (no settings.json) starts on classic Claude (`CurrentSkin=""`).
+- **GitHub API rate limit (gotcha):** the unauthenticated GitHub API allows **60 req/h per
+  IP**. Hammering many install/check cycles from one IP during testing exhausts it and the
+  check then fails silently (CheckForUpdates returns null / throws → swallowed) until the
+  hour resets. In real use each user is on their own IP doing ~1 check/4 h, so it's a
+  non-issue — but don't be fooled in a test loop. (`GithubSource` can take a PAT if ever
+  needed.)
+- **App icon:** `src/ClaudeBuddy/appicon.ico` (multi-res, rendered from classic Claw'd) is
+  embedded via `<ApplicationIcon>` and passed to `vpk pack --icon` (installer + shortcuts).
 - **Repo**: `UpdateService.RepoUrl` = `https://github.com/LbillaSupport/Claude-pet`.
 - **Keep `Velopack` (NuGet) and the `vpk` CLI on the SAME version** (both 1.2.0) — a
   mismatch logs a runtime compatibility warning at pack time.
