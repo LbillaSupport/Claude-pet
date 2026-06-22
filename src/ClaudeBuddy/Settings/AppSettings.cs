@@ -98,13 +98,34 @@ public sealed class AppSettings
     public bool IsFirstEverRun { get; set; }
 }
 
-/// <summary>Persisted lifetime statistics.</summary>
+/// <summary>Persisted lifetime statistics. These also feed Claw'd's "memory": every so
+/// often he comments on them ("ya me lanzaste 327 veces"), which is what makes him feel
+/// like he actually remembers the time you've spent together.</summary>
 public sealed class Stats
 {
     public long PetCount { get; set; }
     public long ClaudeOpenCount { get; set; }
     public long JumpCount { get; set; }
     public long DistanceWalked { get; set; }
+
+    /// <summary>Times the user has picked Claw'd up and flung him.</summary>
+    public long ThrowCount { get; set; }
+
+    /// <summary>Times Claw'd has pulled off a backflip.</summary>
+    public long BackflipCount { get; set; }
+
+    /// <summary>Times Claw'd has waved hello.</summary>
+    public long GreetCount { get; set; }
+
+    /// <summary>Highest point above the ground (in physical px) ever reached — the altitude record.</summary>
+    public long MaxThrowHeightPx { get; set; }
+
+    /// <summary>When Claw'd was last petted (for "hace mucho que no me mimás" lines).</summary>
+    public DateTimeOffset LastPettedUtc { get; set; }
+
+    /// <summary>When the app was last running — used to greet the user back after a gap.</summary>
+    public DateTimeOffset LastSeenUtc { get; set; }
+
     public HashSet<string> SkinsUsed { get; set; } = new();
     public HashSet<string> BehaviorsSeen { get; set; } = new();
 }

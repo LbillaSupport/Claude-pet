@@ -244,13 +244,31 @@ always point at the surface.
 ## Skins with different shapes — `SkinStyle`
 
 Skins are normally just colour palettes, but `SkinPalette.Style` (`Core/Enums.SkinStyle`:
-`Claud`/`Creeper`/`Ghast`/`Nicolaia`/`Galgo`) lets a skin change the silhouette/face.
-`CharacterArtist.Draw` branches on it: Ghast uses `DrawTentacles` (dangling) instead of
-`DrawLegs`; the face is `DrawFace` (Claud), `DrawCreeperFace` (square eyes + the iconic
-frown blocks), or `DrawGhastFace` (sad slanted eyes + frown, opens to a red maw when
-`MouthOpen>0.3`). Built-in skins `Skin.Creeper`/`Skin.Ghast`/`Skin.Nicolaia`/`Skin.Galgo`
+`Claud`/`Creeper`/`Ghast`/`Nicolaia`/`Galgo`/`AmongUs`/`Pikachu`/`Mate`/`Ghost`) lets a skin
+change the silhouette/face. `CharacterArtist.Draw` branches on it: Ghast uses `DrawTentacles`
+(dangling) instead of `DrawLegs`; the face is `DrawFace` (Claud), `DrawCreeperFace` (square
+eyes + the iconic frown blocks), or `DrawGhastFace` (sad slanted eyes + frown, opens to a red
+maw when `MouthOpen>0.3`). Built-in skins
+`Skin.Creeper`/`Skin.Ghast`/`Skin.Nicolaia`/`Skin.Galgo`/`Skin.AmongUs`/`Skin.Pikachu`/`Skin.Mate`/`Skin.Ghost`
 are always available (added in `SkinManager.Discover` alongside `BuiltIn`). JSON skins can
-set `"style":"creeper|ghast|nicolaia|galgo"` (parsed in `SkinManager.ResolvePalette`).
+set `"style":"creeper|ghast|nicolaia|galgo|amongus|pikachu|mate|ghost"` (parsed in
+`SkinManager.ResolvePalette`).
+
+- **AmongUs / Mate / Ghost** = their OWN silhouette (not the block+legs), drawn by
+  `DrawAmongUs` / `DrawMateChar` / `DrawGhost`, which **short-circuit** the pipeline (draw
+  body+face, then `DrawProps`, then `canvas.Restore(); return;`). UNLIKE the rigid Galgo bus
+  they **keep** the soft squash/sway transform (they branch *after* it's applied), so they
+  still feel alive. AmongUs = capsule body + visor (pupils track cursor) + backpack + 2 legs;
+  Mate = brown gourd + green yerba cap + metal bombilla + classic square eyes/cheeks/smile;
+  Ghost = Pac-Man-style dome with a scalloped skirt + big white eyes with cursor-tracking blue
+  pupils. **Pikachu** instead reuses the classic block+legs and adds `DrawPikachuBackparts`
+  (long ears with dark tips + a lightning-bolt tail, drawn *before* the body) +
+  `DrawPikachuFace` (round glinty eyes, big red cheeks, a small smile). All four honour the
+  **universal `Pose.SpiralEyes>0.5` dizzy override** (`DrawDizzyPair`) — add that check to any
+  new face. Per-skin `HudHeadroom` raised for the tall ones (Pikachu ears 1.42, Mate bombilla
+  1.30, AmongUs 1.18). Skin-aware self-talk pools added in `Phrasebook` (`SelfAmongUs`/
+  `SelfPikachu`/`SelfMate`/`SelfGhost`) so each one talks in character. Verify any of them
+  with `--render <id> out.png 480` (and `... 480 Dizzy` / `... 480 bubble`).
 
 - **Nicolaia** = the classic block dressed as a dapper fellow: `DrawNicolaiaSuit` (black
   jacket over the lower torso + a wide white shirt V with lapels, a bow-tie and waistcoat
@@ -357,8 +375,57 @@ floats by the crab, plus mood-driven speech bubbles.
   charge, terminal nub, low-charge pulse, charging bolt) + speech bubble (rounded, tail,
   measured text via `SKPaint.MeasureText`/`DrawText`, Segoe UI, **no emoji** — Skia software
   raster won't color-render them). Drawn in `MascotEngine.DrawUsageHud`, **frontmost and
-  screen-upright** (never rotated with the body), placed just past the head along the body's
-  up-vector so it tracks onto walls/ceiling.
+  screen-upright** (never rotated with the body). The battery + bubble are **stacked straight
+  UP in SCREEN space** above the body (`anchorX` follows the body centre via `sin(ang)*0.46h`;
+  `stackY = feet.Y - headroom*height`), NOT along the body's rotating up-vector — anchoring to
+  the up-vector made the battery fly off sideways (read as "vertical") when clinging to a wall.
+  `DrawBubble` **word-wraps** and clamps its rect inside the **on-screen slice** of the canvas
+  (`visLeft`/`visRight` = the canvas intersected with `World.LeftWall/RightWall`), so it grows
+  taller (not wider) AND slides away from a monitor edge instead of spilling off it — the crab
+  hugging the right screen edge no longer clips the bubble against the screen. Verify with
+  `--render <skin> out.png 480 bubble` (centred) and `... bubbleedge` (simulates the right edge).
+- **Skin-aware self-talk:** `Phrasebook.SelfReferential(SkinStyle)` mixes universal lines with
+  skin-specific ones so the Creeper never says "soy terracota" (the Galgo bus talks about line 34,
+  etc.). Engine passes `_skins.Current.Palette.Style`.
+- **Desktop-anchored (#4)** — Claw'd interacts with the *real* desktop. `Services/DesktopProbe`
+  is **read-only, best-effort** Win32: `TryGetClockX` walks `Shell_TrayWnd → TrayNotifyWnd →
+  TrayClockWClass` for the taskbar clock's true screen X, falling back to the taskbar's right
+  corner (**Windows 11 has no `TrayClockWClass` HWND** — the clock is UWP — so the fallback is
+  the normal path there). `MascotEngine.MaybeDesktopInteraction` walks the crab to that X and
+  reads the real time. New `BehaviorMovement.ApproachPoint` (+ `BehaviorController.SetApproachX`)
+  walks to a specific engine-set world X. `push-cursor` (`AnimationState.Push`) strains against
+  the mouse pointer via `ApproachCursor`. New P/Invokes (FindWindow/FindWindowEx/GetWindowRect)
+  live in `NativeMethods`. **Gotcha:** `NativeMethods` is internal, so a public probe method
+  can't expose `NativeMethods.RECT` — return primitives (the clock returns just `out float X`).
+  `MaybeDesktopInteraction` now also (half the time) calls `PeekAtCorner` → the weight-0
+  `peek-corner` behaviour walks to the nearer screen-edge corner and peeks (no Win32, safe on
+  any build).
+- **Desktop reactions (#4, safe subset)** — `MascotEngine.UpdateDesktopReactions(dt)`, called
+  each brain tick, adds two read-only reactions that need no walking: (1) **active-window
+  switch** via `NativeMethods.GetForegroundWindow()` — when the foreground HWND changes it does
+  a brief `look-around` + sometimes a bubble (first sighting is seeded, not a "change";
+  `WindowReactCooldown` debounce); (2) **system volume change** via `Services/SystemAudioProbe`
+  (`TryGetMasterVolume` — minimal Core Audio `IAudioEndpointVolume` COM interop, **identical on
+  Win10/Win11**, all best-effort/try-catch so a missing endpoint just no-ops): polled every
+  `VolumePollSeconds`, a delta past `VolumeReactDelta` triggers `wiggle` (louder) or `surprised`
+  (quieter/mute) + a bubble. Both gated by `IsCalmGrounded()`. Verified Core Audio reads the
+  real level on this machine. Still deferred (most fragile): recycle-bin icon position,
+  notification reactions.
+- **Portal clone event (#6)** — a second Claw'd drops out of a **Portal-game-style portal**
+  ANYWHERE on screen and falls in with the **real physics**. It has its OWN everything so it's
+  independent of the main mascot: a passive `LayeredWindow` (`new LayeredWindow(class, passive:true)`
+  — the constructor + `_passive` flag make it pure click-through, no input, **no `PostQuitMessage`
+  on destroy** so closing it never kills the app) that **follows the clone** (so it's not stuck in
+  Claw'd's 480px window), its own `SkiaRenderer`, `Mascot`, `Animator`, `EmotionState`, and its own
+  `PhysicsSystem` instance (no subscribers → its landings never fire Claw'd's `OnImpact`/`OnLanded`).
+  State machine in `MascotEngine.UpdateCloneEvent`: `Opening → Drop (gravity+bounce) → Linger
+  (look around, wave) → ExitOpen → ExitClose`. `CharacterArtist.DrawPortal` draws the glowing
+  cyan oval (centre-based, can float in the air). The clone fades via an `SKCanvas.SaveLayer`
+  alpha layer around `_artist.Draw`. Rendered in `RenderClone` (its window follows the clone).
+  Fires ~40 s after launch (a demo), then rare (`Rare{Min,Max}Gap`). The real Claw'd does a
+  double-take (`MaybeReactToClone`) if the clone lands nearby. Preview the art: `--render <skin>
+  out.png 480 portal`. **Gotcha:** the clone window must be a DIFFERENT window class than the main
+  one (`ClaudeBuddyCloneWindowClass`) so it dispatches to its own passive WndProc.
 - **Reactions**: `MascotEngine.UpdateUsageReactions` fires bubbles on charge-bucket crossings,
   a periodic flavour line, and a **renewal celebration** (confetti + bubble + Excited) when
   `WindowId` increments; low battery nudges Sleepy/Lazy mood. Phrases are Spanish string pools
@@ -449,6 +516,19 @@ WM_TIMER **is** delivered during the modal loop, and its handler invokes the sta
 `_menu.Show` in `BeginModalTicks()`/`finally EndModalTicks()`. (`wParam`==timer-id compared
 as `(ulong)` — nint vs nuint is ambiguous otherwise.)
 
+### "Play Animation" submenu (review/showcase every animation)
+The right-click menu has a **Play Animation ▸** submenu that force-plays ANY single animation
+on demand — handy to review (and tune) each one, and to demo them. It's built **from the
+catalogue**: `MascotEngine.BuildMenuState` lists `_catalog.All` (every behaviour, including
+the weight-0 reaction-only ones like `pet`/`dizzy`/`shiver`) as `AnimationMenuItem`s grouped
+by `BehaviorCategory`, plus one synthetic **"Portal Clone Event"** entry (`PortalAnimId =
+"__portal__"`). `ContextMenu.BuildAnimationMenu` renders per-category sub-sub-menus; leaves
+carry `AnimBase (2000) + index`, decoded back to the behaviour id in `MenuSelection.SkinId`
+(the string field is reused). `MascotEngine.PlayAnimationFromMenu` drops any climb/drag to a
+clean upright floor stance then `Trigger(id)`s it; the Portal sentinel calls `StartCloneEvent()`
+(no-op if one's already running; `EndCloneEvent` restores the normal rare cadence afterward).
+Adding a behaviour to the catalogue therefore makes it appear in this menu automatically.
+
 ## Behaviours — `Behaviors/`
 
 Everything is **data** in `BehaviorCatalog.BuildDefaults()`. A behaviour =
@@ -465,6 +545,66 @@ MoodIntensity, MinHappiness, EnterParticle, EnterSound }`.
   `people-watch`/`admire-view`/`wake-stretch`. Three new poses with sub-motion in
   `Animator.BuildTarget`: `AnimationState.Groom` (alternating head-tilts + a "hand" preen),
   `TapFoot` (planted legs, beat bob), `Wiggle` (gentle in-place sway, a calmer mini-dance).
+- **"Performances"** (vNext): `sneeze`/`cough`/`look-under`/`count-legs`/`balance`/`dust-off`/
+  `somersault`/`slip` are autonomous; `embarrassed`/`pout` are weight-0 (reaction/chain only).
+  Each is a new `AnimationState` with phased sub-motion in `Animator.BuildTarget` reusing only
+  existing `Pose` fields (no new fields, no new art). `Sneeze`/`Cough` are in `ApplyBlink`'s
+  `eyesScripted` set. **Gotcha:** a frown only renders when `MouthOpen > 0.14` — `Pout` sets
+  `0.2` so the puchero shows.
+
+## vNext — "feels alive" systems (Phrasebook, chatter, memory, chains, micro-interactions)
+
+A push to make Claw'd surprise you for hours without adding "features". All procedural, all
+reusing the existing `BehaviorCatalog`/`Animator`/`Pose`/`Physics`.
+
+- **`Content/Phrasebook.cs`** (new, DI singleton) owns Claw'd's *entire* spoken repertoire as
+  data: categorised Spanish pools (observations, time-of-day ×5, absurd, self-referential
+  generic + per-skin, welcome, annoyed) + a **400+ fun-fact** database grouped by topic
+  (animals, space, history, programming, games, physics, chemistry, body, food, geography,
+  art, OS/internet/AI, useless trivia…). All **emoji-free** (Skia software raster can't
+  colour-render them); keep new lines plain ASCII-ish Spanish (acented chars OK via Segoe UI,
+  but **no emoji**). `Pick()` keeps a rolling 18-line history so no pool repeats back-to-back
+  across categories. Pools are just `static readonly string[]` — append lines freely.
+- **Ambient chatter** (`MascotEngine.UpdateChatter`): an **always-on** speech driver,
+  independent of WorldData/battery, on a `Chatter{Min,Max}Gap` cooldown. `NextChatterLine`
+  weights fun-fact/absurd/self-ref/time + an **idle observation** when `_idleSeconds` (reset on
+  any cursor move/keypress) crosses `IdleChatterSeconds`, plus a "welcome back" after an absence.
+  Never talks over an active bubble. The old WorldData fact-rotation was folded into this; that
+  method now only does weather/holiday. `DataLine` returns dollar/crypto/greeting (or null).
+- **Memory** (`Stats` extended: `ThrowCount`/`BackflipCount`/`GreetCount`/`MaxThrowHeightPx`/
+  `LastPettedUtc`/`LastSeenUtc`). Incremented in `ReleaseThrow`/`OnBehaviorStarted`/`Pet`/
+  `AccumulateStats` (altitude tracked while airborne & not climbing). `MemoryLine()` builds
+  lines like "Ya me lanzaste N veces"; `Initialize` captures days-since-`LastSeenUtc` for the
+  welcome-back. All persists in `settings.json` (survives updates, see AppData note above).
+- **Behaviour chains** (`BehaviorController.RunChain` + a `Queue<string> _chain`): sequenced
+  "stories" — each step runs to its natural end, then the next `Begin`s; the queue drains back
+  to autonomous selection. **`Force` (any interaction) clears the chain.** Engine data in
+  `MascotEngine.Chains` + `MaybeStartChain` (fires from a calm grounded state on `Chain{Min,Max}Gap`).
+- **Rare "special moments"** (`MascotEngine.MaybeRareEvent`, `Rare{Min,Max}Gap` ≈ 20–75 min):
+  a flashy chain + confetti/stars/magic + bubble. Pure reuse of existing behaviours.
+- **Micro-interactions** (`MascotEngine.UpdateCursorMicro` + `OnDoubleClick`): circling the
+  cursor round the mascot feeds the existing **dizziness** meter (→ dizzy reaction for free); a
+  fast flick passing close → a startled **ruffle** (`surprised` + dust); 3 quick double-clicks
+  → a **tickle** giggle (`laugh` + hearts); rough handling already builds `_abuseMeter` → now a
+  **`Pout`** sulk (`AnimationState.Pout`) during the `_refuseTimer`. **Give a paw**
+  (`UpdateGivePaw`): rest the cursor still right beside it (within `GivePawRadius`, speed under
+  `GivePawMaxCursorSpeed`) for `GivePawHoldSeconds` and it offers a paw — reuses the `wave` pose
+  (lifts an outer leg toward the cursor) + hearts, `GivePawCooldown` debounce; decays fast if
+  the cursor moves away.
+- **Imaginary props** (#5) ride a **single generic channel** rather than 20 Pose fields:
+  `Pose.HeldProp` (a `Core.HeldPropKind` enum, set directly — not blended) + `Pose.HeldPropAmount`
+  (faded). One `AnimationState.HoldProp` pose presents whatever prop the engine selected via
+  `Animator.SetHeldProp`, fed from `BehaviorDefinition.HeldProp` in `OnBehaviorStarted` (cleared
+  for every non-prop behaviour so it fades out). `CharacterArtist.DrawHeldProp` switches on the
+  kind → 16 procedural draws (magnifier/balloon/flag/flashlight/ice-cream/mate/binoculars/
+  paintbrush/toy-hammer/sword/kite/watering-can/umbrella/guitar/camera/trophy). **Adding a
+  prop = one draw method + one catalogue line.** **Gotchas:** Skia's `RotateRadians` has **no
+  pivot overload** (translate→rotate→translate); and prop draws that touch `_stroke.StrokeCap`
+  must restore it to **Round** (the shared paint's default) or they corrupt later strokes.
+  `DrawSparkleStar` is a shared 4-point twinkle helper (used by camera/trophy).
+  `--render <skin> out.png <sz> <PropName>` previews any prop (the CLI parses a `HeldPropKind`
+  name onto a neutral presenting pose).
+- All tunables live under `// ---- Ambient chatter ----` in `EngineConstants.cs`.
 
 ---
 

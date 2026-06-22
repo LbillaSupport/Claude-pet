@@ -20,9 +20,15 @@ public sealed class BehaviorController
     private readonly Rng _rng;
     private readonly Dictionary<string, float> _cooldowns = new(StringComparer.OrdinalIgnoreCase);
 
+    // A queued sequence of behaviours — a little "story" (walk → find → examine → wave →
+    // leave). Each step runs to its natural end, then the next is begun, until the queue
+    // drains and autonomous selection resumes. Any interaction (Force) clears it.
+    private readonly Queue<string> _chain = new();
+
     private float _elapsed;
     private float _duration;
     private float _targetX;
+    private float _approachX;     // a specific world X for ApproachPoint (set by the engine)
     private bool _dynamicTarget;
     private bool _drivingLocomotion;
     private bool _climaxFired;
@@ -71,6 +77,9 @@ public sealed class BehaviorController
     /// <summary>True when the active behaviour is steering horizontal movement.</summary>
     public bool ControlsLocomotion => _drivingLocomotion;
 
+    /// <summary>True while a queued behaviour "story" is still playing out.</summary>
+    public bool ChainActive => _chain.Count > 0;
+
     public void Update(
         Mascot mascot,
         World world,
@@ -93,12 +102,20 @@ public sealed class BehaviorController
 
         bool finished = _elapsed >= _duration;
 
-        // A reaction behaviour that runs out, or any behaviour reaching its time,
-        // hands control back to the autonomous selector.
+        // A reaction behaviour that runs out, or any behaviour reaching its time, advances
+        // a running "story" to its next step, or otherwise hands control back to the
+        // autonomous selector.
         if (finished)
         {
-            Begin(_selector.Select(_catalog, _cooldowns, routine, emotion, Current.Id),
-                  mascot, world, emotion, routine, cursorWorld, behaviorFrequency);
+            if (_chain.Count > 0 && _catalog.TryGet(_chain.Dequeue(), out BehaviorDefinition? next))
+            {
+                Begin(next, mascot, world, emotion, routine, cursorWorld, behaviorFrequency);
+            }
+            else
+            {
+                Begin(_selector.Select(_catalog, _cooldowns, routine, emotion, Current.Id),
+                      mascot, world, emotion, routine, cursorWorld, behaviorFrequency);
+            }
         }
 
         ApplyMovement(mascot, world, emotion, routine, cursorWorld, dt);
@@ -108,13 +125,38 @@ public sealed class BehaviorController
     public void Force(string id, Mascot mascot, World world, EmotionState emotion,
         in RoutineProfile routine, Vector2 cursorWorld, float behaviorFrequency = 1f)
     {
+        _chain.Clear(); // an interaction interrupts any running story
         if (_catalog.TryGet(id, out BehaviorDefinition? def))
         {
             Begin(def, mascot, world, emotion, routine, cursorWorld, behaviorFrequency);
         }
     }
 
+    /// <summary>
+    /// Kicks off a sequenced "story": the first behaviour begins now, each subsequent one
+    /// starts when its predecessor finishes. Unknown ids are skipped. Any <see cref="Force"/>
+    /// (an interaction) cancels the remainder.
+    /// </summary>
+    public void RunChain(IReadOnlyList<string> ids, Mascot mascot, World world, EmotionState emotion,
+        in RoutineProfile routine, Vector2 cursorWorld, float behaviorFrequency = 1f)
+    {
+        _chain.Clear();
+        for (int i = 1; i < ids.Count; i++)
+        {
+            _chain.Enqueue(ids[i]);
+        }
+
+        if (ids.Count > 0 && _catalog.TryGet(ids[0], out BehaviorDefinition? def))
+        {
+            Begin(def, mascot, world, emotion, routine, cursorWorld, behaviorFrequency);
+        }
+    }
+
     public bool IsRunning(string id) => Current.Id.Equals(id, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Sets the world X an <see cref="BehaviorMovement.ApproachPoint"/> behaviour walks to
+    /// (e.g. the real taskbar clock). Call right before forcing such a behaviour.</summary>
+    public void SetApproachX(float worldX) => _approachX = worldX;
 
     private void Begin(
         BehaviorDefinition def,
@@ -161,6 +203,8 @@ public sealed class BehaviorController
                 _rng.Range(world.LeftWall + 120f, world.RightWall - 120f),
             BehaviorMovement.EdgePeek =>
                 mascot.Position.X < (world.LeftWall + world.RightWall) * 0.5f ? world.LeftWall + 30f : world.RightWall - 30f,
+            BehaviorMovement.ApproachPoint =>
+                MathUtil.Clamp(_approachX, world.LeftWall + mascot.HalfWidthPx(world.DpiScale), world.RightWall - mascot.HalfWidthPx(world.DpiScale)),
             _ => mascot.Position.X,
         };
 
@@ -246,6 +290,14 @@ public sealed class BehaviorController
         {
             // Reached the cursor: stop and study it with the behaviour's own pose.
             mascot.Velocity = mascot.Velocity.WithX(MathUtil.Damp(mascot.Velocity.X, 0f, 10f, dt));
+            mascot.Animation = Current.Animation;
+            return;
+        }
+
+        if (Current.Movement == BehaviorMovement.ApproachPoint && MathF.Abs(delta) < 26f)
+        {
+            // Arrived at the target spot (e.g. under the real clock): stop and play the pose.
+            mascot.Velocity = mascot.Velocity.WithX(MathUtil.Damp(mascot.Velocity.X, 0f, 12f, dt));
             mascot.Animation = Current.Animation;
             return;
         }

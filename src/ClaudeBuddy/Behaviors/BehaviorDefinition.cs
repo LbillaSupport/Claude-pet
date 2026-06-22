@@ -11,6 +11,7 @@ public enum BehaviorMovement
     ApproachCursor,  // walk toward the mouse
     FleeCursor,      // run away from the mouse
     EdgePeek,        // walk to the nearest screen edge and peek
+    ApproachPoint,   // walk to a specific world X set by the engine (e.g. the real clock)
 }
 
 /// <summary>
@@ -76,4 +77,11 @@ public sealed record BehaviorDefinition
 
     /// <summary>Optional sound key (resolved by the audio service) on entry.</summary>
     public string? EnterSound { get; init; }
+
+    /// <summary>
+    /// Optional imaginary prop to show off. Only meaningful for behaviours whose
+    /// <see cref="Animation"/> is <see cref="AnimationState.HoldProp"/>; the engine feeds it
+    /// to the animator on entry (and clears it on the next behaviour).
+    /// </summary>
+    public HeldPropKind? HeldProp { get; init; }
 }

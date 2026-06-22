@@ -85,6 +85,28 @@ public sealed class CharacterArtist
             return;
         }
 
+        // Among Us / Mate / Ghost have their own silhouette (not the block + legs). Unlike the
+        // rigid Galgo bus they keep the soft squash/sway built into the transform above, so they
+        // still feel alive — they just draw a different body + face here and short-circuit.
+        switch (palette.Style)
+        {
+            case SkinStyle.AmongUs:
+                DrawAmongUs(canvas, h, pose, palette, lookX);
+                DrawProps(canvas, h, pose, palette);
+                canvas.Restore();
+                return;
+            case SkinStyle.Mate:
+                DrawMateChar(canvas, h, pose, palette, lookX);
+                DrawProps(canvas, h, pose, palette);
+                canvas.Restore();
+                return;
+            case SkinStyle.Ghost:
+                DrawGhost(canvas, h, pose, palette, lookX);
+                DrawProps(canvas, h, pose, palette);
+                canvas.Restore();
+                return;
+        }
+
         // Drawn back-to-front so the body overlaps the limbs. The silhouette and face
         // depend on the skin's style (classic Claw'd, Creeper, or floaty Ghast).
         if (palette.Style == SkinStyle.Ghast)
@@ -96,12 +118,21 @@ public sealed class CharacterArtist
             DrawLegs(canvas, h, pose, palette);
         }
 
+        // Pikachu's ears + tail sit behind/around the block; draw them before the body.
+        if (palette.Style == SkinStyle.Pikachu)
+        {
+            DrawPikachuBackparts(canvas, h, pose, palette);
+        }
+
         DrawBody(canvas, h, palette);
 
         switch (palette.Style)
         {
             case SkinStyle.Creeper:
                 DrawCreeperFace(canvas, h, pose, palette, lookX);
+                break;
+            case SkinStyle.Pikachu:
+                DrawPikachuFace(canvas, h, pose, palette, lookX);
                 break;
             case SkinStyle.Ghast:
                 DrawGhastFace(canvas, h, pose, palette, lookX);
@@ -651,6 +682,305 @@ public sealed class CharacterArtist
         canvas.DrawRect(new SKRect(-crownHalf + (0.02f * h), crownTop + (0.02f * h), -crownHalf + (0.05f * h), brimTop), _fill);
     }
 
+    // ---- Among Us crewmate ---------------------------------------------------
+    // Its own capsule silhouette (not the block + legs): a rounded bean body, a wide
+    // visor, a little backpack and two stubby legs. Palette mapping:
+    //   Body = suit colour · BodyShadow = darker suit (legs/backpack edge)
+    //   Belly = visor glass · Pupil = visor frame · Accent = backpack highlight.
+    private void DrawAmongUs(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    {
+        float topY = -1.02f * h, bottomY = -0.06f * h;
+        float halfW = 0.30f * h;
+
+        // Legs (two stubby ones, with a tiny walk lift from the pose).
+        _fill.Color = palette.BodyShadow.ToSk();
+        for (int i = 0; i < 2; i++)
+        {
+            float lx = (i == 0 ? -1 : 1) * 0.14f * h;
+            float lift = MathF.Max(0f, MathF.Sin((pose.LegPhase + (i * 0.5f)) * MathUtil.Tau)) * pose.StrideAmount * 0.05f * h;
+            canvas.DrawRoundRect(new SKRect(lx - (0.07f * h), bottomY - (0.06f * h) - lift, lx + (0.07f * h), bottomY + (0.02f * h) - lift), 0.04f * h, 0.04f * h, _fill);
+        }
+
+        // Backpack (behind the body, to the left in unmirrored space).
+        _fill.Color = palette.BodyShadow.ToSk();
+        canvas.DrawRoundRect(new SKRect(-halfW - (0.10f * h), -0.78f * h, -halfW + (0.06f * h), -0.30f * h), 0.06f * h, 0.06f * h, _fill);
+        _fill.Color = palette.Accent.ToSk(0.6f);
+        canvas.DrawRoundRect(new SKRect(-halfW - (0.08f * h), -0.74f * h, -halfW + (0.02f * h), -0.40f * h), 0.04f * h, 0.04f * h, _fill);
+
+        // Body: a capsule (rounded top, flat-ish bottom).
+        using (var body = new SKPath())
+        {
+            float r = halfW;
+            body.MoveTo(-halfW, bottomY);
+            body.LineTo(-halfW, topY + r);
+            body.ArcTo(new SKRect(-halfW, topY, halfW, topY + (2f * r)), 180, 180, false);
+            body.LineTo(halfW, bottomY);
+            body.ArcTo(new SKRect(-halfW, bottomY - (0.06f * h), halfW, bottomY + (0.06f * h)), 0, 180, false);
+            body.Close();
+            _fill.Color = palette.Body.ToSk();
+            canvas.DrawPath(body, _fill);
+        }
+
+        // Bottom shadow band + top sheen for a little form.
+        _fill.Color = palette.BodyShadow.ToSk(0.4f);
+        canvas.DrawRoundRect(new SKRect(-halfW, -0.18f * h, halfW, bottomY), 0.05f * h, 0.05f * h, _fill);
+        _fill.Color = new SKColor(255, 255, 255, 30);
+        canvas.DrawOval(new SKRect(-halfW * 0.6f, topY + (0.04f * h), halfW * 0.1f, topY + (0.3f * h)), _fill);
+
+        // Visor: a horizontal capsule high on the body, glass with a frame + glint.
+        float vy = -0.74f * h, vh = 0.16f * h;
+        var visor = new SKRect(-0.05f * h, vy - (vh / 2f), halfW + (0.08f * h), vy + (vh / 2f));
+        _fill.Color = palette.Pupil.ToSk(); // frame
+        canvas.DrawRoundRect(new SKRect(visor.Left - (0.02f * h), visor.Top - (0.02f * h), visor.Right + (0.02f * h), visor.Bottom + (0.02f * h)), vh, vh, _fill);
+
+        // Dizzy overlay: spiral eyes on the visor glass.
+        if (pose.SpiralEyes > 0.5f)
+        {
+            _fill.Color = palette.Belly.ToSk();
+            canvas.DrawRoundRect(visor, vh * 0.5f, vh * 0.5f, _fill);
+            DrawDizzyPair(canvas, 0.10f * h, vy, 0.05f * h, palette);
+            return;
+        }
+
+        _fill.Color = palette.Belly.ToSk();
+        canvas.DrawRoundRect(visor, vh * 0.5f, vh * 0.5f, _fill);
+        // Glint sweeping across the glass.
+        _fill.Color = new SKColor(255, 255, 255, 150);
+        canvas.DrawRoundRect(new SKRect(visor.Left + (0.03f * h), visor.Top + (0.02f * h), visor.Left + (0.10f * h), visor.Bottom - (0.02f * h)), vh * 0.4f, vh * 0.4f, _fill);
+        // Pupils tracking the cursor inside the visor (so it feels alive).
+        _fill.Color = palette.Pupil.ToSk(0.85f);
+        float pcx = visor.MidX + (lookX * 0.04f * h);
+        canvas.DrawCircle(pcx, vy + (pose.EyeLookY * 0.03f * h), 0.022f * h, _fill);
+    }
+
+    // ---- Mate (the Argentine gourd with a bombilla) --------------------------
+    // A rounded gourd body, a green "yerba" cap on top with a metal bombilla straw, and
+    // a friendly little face. Palette mapping:
+    //   Body = gourd brown · BodyShadow = darker brown · Belly = green yerba
+    //   Accent = metal bombilla · Pupil = eyes · Mouth = mouth.
+    private void DrawMateChar(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    {
+        float cx = 0f, cyBody = -0.42f * h, rTop = 0.34f * h, rBottom = 0.40f * h;
+
+        // Gourd body: a circle-ish bulb, slightly fatter at the bottom.
+        _fill.Color = palette.Body.ToSk();
+        canvas.DrawOval(new SKRect(cx - rBottom, cyBody - rTop, cx + rBottom, cyBody + rBottom), _fill);
+        // Bottom shadow + side sheen.
+        _fill.Color = palette.BodyShadow.ToSk(0.5f);
+        canvas.DrawOval(new SKRect(cx - rBottom, cyBody + (rBottom * 0.2f), cx + rBottom, cyBody + rBottom), _fill);
+        _fill.Color = new SKColor(255, 255, 255, 28);
+        canvas.DrawOval(new SKRect(cx - (rBottom * 0.7f), cyBody - (rTop * 0.8f), cx - (rBottom * 0.1f), cyBody + (rBottom * 0.1f)), _fill);
+
+        // Green yerba cap on top.
+        float capY = cyBody - (rTop * 0.92f);
+        using (var cap = new SKPath())
+        {
+            cap.AddOval(new SKRect(cx - (rTop * 0.82f), capY - (0.10f * h), cx + (rTop * 0.82f), capY + (0.14f * h)));
+            _fill.Color = palette.Belly.ToSk();
+            canvas.DrawPath(cap, _fill);
+        }
+
+        _fill.Color = palette.Belly.ToSk(0.7f); // a few darker yerba flecks
+        for (int i = -2; i <= 2; i++)
+        {
+            canvas.DrawCircle(cx + (i * 0.06f * h), capY - (0.01f * h), 0.012f * h, _fill);
+        }
+
+        // Bombilla (metal straw) poking up-right out of the yerba.
+        _stroke.Color = palette.Accent.ToSk();
+        _stroke.StrokeWidth = 0.035f * h;
+        _stroke.StrokeCap = SKStrokeCap.Round;
+        canvas.DrawLine(cx + (0.10f * h), capY - (0.02f * h), cx + (0.30f * h), capY - (0.40f * h), _stroke);
+        _fill.Color = palette.Accent.ToSk();
+        canvas.DrawCircle(cx + (0.30f * h), capY - (0.40f * h), 0.03f * h, _fill); // mouthpiece
+
+        // Face on the gourd.
+        float eyeX = 0.13f * h, eyeY = cyBody - (0.04f * h), s = 0.13f * h;
+        if (pose.SpiralEyes > 0.5f)
+        {
+            DrawDizzyPair(canvas, eyeX, eyeY, s * 0.5f, palette);
+            return;
+        }
+
+        DrawEye(canvas, -eyeX, eyeY, s, pose, palette, lookX);
+        DrawEye(canvas, eyeX, eyeY, s, pose, palette, lookX);
+        // Rosy cheeks.
+        _fill.Color = palette.Blush.ToSk(0.5f);
+        canvas.DrawCircle(-0.20f * h, eyeY + (0.10f * h), 0.045f * h, _fill);
+        canvas.DrawCircle(0.20f * h, eyeY + (0.10f * h), 0.045f * h, _fill);
+        // A small smile.
+        _stroke.Color = palette.Mouth.ToSk();
+        _stroke.StrokeWidth = 0.026f * h;
+        using (var smile = new SKPath())
+        {
+            float my = eyeY + (0.16f * h);
+            smile.MoveTo(-0.08f * h, my);
+            smile.QuadTo(0f, my + (0.06f * h), 0.08f * h, my);
+            canvas.DrawPath(smile, _stroke);
+        }
+    }
+
+    // ---- Ghost (a friendly Pac-Man-style ghost) ------------------------------
+    // A dome body with a wavy skirt and big classic ghost eyes. Palette mapping:
+    //   Body = ghost colour · BodyShadow = darker · Belly = eye whites · Pupil = pupils.
+    private void DrawGhost(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    {
+        float halfW = 0.34f * h;
+        float topY = -0.98f * h, bottomY = -0.06f * h;
+        float domeR = halfW;
+
+        // Body: a dome on top, straight sides, a wavy (scalloped) bottom edge.
+        using (var body = new SKPath())
+        {
+            body.MoveTo(-halfW, bottomY);
+            body.LineTo(-halfW, topY + domeR);
+            body.ArcTo(new SKRect(-halfW, topY, halfW, topY + (2f * domeR)), 180, 180, false);
+            body.LineTo(halfW, bottomY);
+            // Scalloped skirt: 4 little upward arcs back to the left.
+            const int waves = 4;
+            float step = (2f * halfW) / waves;
+            for (int i = 0; i < waves; i++)
+            {
+                float x0 = halfW - (i * step);
+                float xm = x0 - (step * 0.5f);
+                float x1 = x0 - step;
+                body.QuadTo(xm, bottomY - (0.07f * h), x1, bottomY);
+            }
+
+            body.Close();
+            _fill.Color = palette.Body.ToSk();
+            canvas.DrawPath(body, _fill);
+        }
+
+        // Soft side sheen.
+        _fill.Color = new SKColor(255, 255, 255, 32);
+        canvas.DrawOval(new SKRect(-halfW * 0.7f, topY + (0.05f * h), -halfW * 0.05f, topY + (0.4f * h)), _fill);
+
+        // Eyes.
+        float eyeX = 0.13f * h, eyeY = -0.66f * h;
+        if (pose.SpiralEyes > 0.5f)
+        {
+            DrawDizzyPair(canvas, eyeX, eyeY, 0.07f * h, palette);
+            return;
+        }
+
+        float ew = 0.10f * h, eh = 0.13f * h;
+        for (int side = -1; side <= 1; side += 2)
+        {
+            float ex = side * eyeX;
+            _fill.Color = palette.Belly.ToSk(); // white
+            canvas.DrawOval(new SKRect(ex - ew, eyeY - eh, ex + ew, eyeY + eh), _fill);
+            // Pupil looks toward the cursor.
+            _fill.Color = palette.Pupil.ToSk();
+            float px = ex + (lookX * 0.05f * h);
+            float py = eyeY + (pose.EyeLookY * 0.05f * h) + (0.02f * h);
+            canvas.DrawOval(new SKRect(px - (ew * 0.55f), py - (eh * 0.5f), px + (ew * 0.55f), py + (eh * 0.5f)), _fill);
+        }
+    }
+
+    // ---- Pikachu add-ons (ears behind, tail, face) ---------------------------
+    // Pikachu reuses the classic block + legs but draws long ears + a lightning tail
+    // behind it and its own cheeky face. Palette mapping:
+    //   Body = yellow · BodyShadow = ear tips / brown · Blush = red cheeks
+    //   Accent = brown back stripes · Pupil = eyes.
+    private void DrawPikachuBackparts(SKCanvas canvas, float h, Pose pose, SkinPalette palette)
+    {
+        float halfW = BodyWidth * 0.5f * h;
+
+        // Two long ears rising from the top corners, with dark tips.
+        for (int side = -1; side <= 1; side += 2)
+        {
+            float baseX = side * 0.22f * h;
+            float baseY = BodyTop * h;
+            float tilt = side * 0.10f * h;
+            using var ear = new SKPath();
+            ear.MoveTo(baseX - (0.07f * h), baseY);
+            ear.LineTo(baseX + tilt - (0.02f * h), baseY - (0.42f * h));
+            ear.LineTo(baseX + tilt + (0.06f * h), baseY - (0.40f * h));
+            ear.LineTo(baseX + (0.08f * h), baseY);
+            ear.Close();
+            _fill.Color = palette.Body.ToSk();
+            canvas.DrawPath(ear, _fill);
+            // Dark tip.
+            using var tip = new SKPath();
+            tip.MoveTo(baseX + tilt - (0.02f * h), baseY - (0.42f * h));
+            tip.LineTo(baseX + tilt + (0.06f * h), baseY - (0.40f * h));
+            tip.LineTo(baseX + tilt + (0.045f * h), baseY - (0.30f * h));
+            tip.LineTo(baseX + tilt - (0.01f * h), baseY - (0.31f * h));
+            tip.Close();
+            _fill.Color = palette.BodyShadow.ToSk();
+            canvas.DrawPath(tip, _fill);
+        }
+
+        // Lightning-bolt tail poking out to the right behind the body.
+        using (var tail = new SKPath())
+        {
+            float tx = halfW - (0.02f * h), ty = -0.30f * h;
+            tail.MoveTo(tx, ty);
+            tail.LineTo(tx + (0.16f * h), ty - (0.04f * h));
+            tail.LineTo(tx + (0.09f * h), ty - (0.12f * h));
+            tail.LineTo(tx + (0.24f * h), ty - (0.16f * h));
+            tail.LineTo(tx + (0.16f * h), ty - (0.30f * h));
+            tail.LineTo(tx + (0.30f * h), ty - (0.34f * h));
+            tail.LineTo(tx + (0.20f * h), ty - (0.50f * h));
+            tail.LineTo(tx + (0.10f * h), ty - (0.20f * h));
+            tail.LineTo(tx + (0.04f * h), ty - (0.08f * h));
+            tail.Close();
+            _fill.Color = palette.Accent.ToSk();
+            canvas.DrawPath(tail, _fill);
+            _fill.Color = palette.BodyShadow.ToSk();
+            canvas.DrawPath(tail, _stroke); // subtle edge
+        }
+    }
+
+    private void DrawPikachuFace(SKCanvas canvas, float h, Pose pose, SkinPalette palette, float lookX)
+    {
+        float eyeX = EyeOffsetX * h;
+        float eyeY = EyeCenterY * h;
+        float s = EyeSize * h;
+
+        if (pose.SpiralEyes > 0.5f)
+        {
+            DrawDizzyPair(canvas, eyeX, eyeY, s * 0.5f, palette);
+            return;
+        }
+
+        // Round black eyes with a glint (cuter than the square block eyes).
+        for (int side = -1; side <= 1; side += 2)
+        {
+            float ex = side * eyeX;
+            float open = MathUtil.Clamp(pose.EyeOpen, 0f, 1.2f);
+            if (open < 0.14f)
+            {
+                _stroke.Color = palette.Pupil.ToSk();
+                _stroke.StrokeWidth = s * 0.16f;
+                canvas.DrawLine(ex - (s * 0.5f), eyeY, ex + (s * 0.5f), eyeY, _stroke);
+                continue;
+            }
+
+            float px = ex + (lookX * s * 0.2f);
+            float py = eyeY + (pose.EyeLookY * s * 0.2f);
+            _fill.Color = palette.Pupil.ToSk();
+            canvas.DrawCircle(px, py, s * 0.5f * open, _fill);
+            _fill.Color = new SKColor(255, 255, 255, 230);
+            canvas.DrawCircle(px - (s * 0.16f), py - (s * 0.16f), s * 0.13f, _fill);
+        }
+
+        // Big red cheeks (Pikachu's signature pouches).
+        _fill.Color = palette.Blush.ToSk(0.9f);
+        canvas.DrawCircle(-0.27f * h, eyeY + (0.12f * h), 0.07f * h, _fill);
+        canvas.DrawCircle(0.27f * h, eyeY + (0.12f * h), 0.07f * h, _fill);
+
+        // A small open smile.
+        _stroke.Color = palette.Mouth.ToSk();
+        _stroke.StrokeWidth = 0.024f * h;
+        using var smile = new SKPath();
+        float my = eyeY + (0.18f * h);
+        smile.MoveTo(-0.05f * h, my);
+        smile.QuadTo(0f, my + (0.05f * h), 0.05f * h, my);
+        canvas.DrawPath(smile, _stroke);
+    }
+
     // ---- Galgo (the cartoon bus, line 34 Liniers–Palermo, Vélez bucket hat) -------
     // A whole-body character: a 3/4-view city bus seen from its smiley front-left. It
     // doesn't use the block/legs at all. Origin is feet at (0,0); the bus sits on its
@@ -981,6 +1311,558 @@ public sealed class CharacterArtist
         {
             DrawFan(canvas, h, pose.FanProp);
         }
+
+        if (pose.HeldProp != HeldPropKind.None && pose.HeldPropAmount > 0.04f)
+        {
+            DrawHeldProp(canvas, h, pose.HeldProp, pose.HeldPropAmount);
+        }
+    }
+
+    // ===================================================================
+    //  Portal (Portal-game style) — the clone's entrance/exit
+    // ===================================================================
+
+    /// <summary>
+    /// Draws a glowing, Portal-style oval portal centred at (<paramref name="cx"/>,
+    /// <paramref name="cy"/>) — a bright cyan-blue rim around a dark void with a couple of
+    /// swirling energy arcs. <paramref name="scale"/> (0..1) opens/closes it and
+    /// <paramref name="alpha"/> fades it; <paramref name="phase"/> drives the swirl.
+    /// </summary>
+    public void DrawPortal(SKCanvas canvas, float cx, float cy, float h, float scale, float alpha, float phase)
+    {
+        if (scale <= 0.02f || alpha <= 0.02f)
+        {
+            return;
+        }
+
+        float ry = 0.58f * h * scale;   // tall oval, like the game's portals
+        float rx = 0.34f * h * scale;
+        var rect = new SKRect(cx - rx, cy - ry, cx + rx, cy + ry);
+
+        // Soft outer glow: a few translucent, expanding blue ovals.
+        for (int i = 4; i >= 1; i--)
+        {
+            float g = 1f + (i * 0.16f);
+            _fill.Color = new SKColor(0x3C, 0xB4, 0xFF, (byte)(34 * alpha));
+            canvas.DrawOval(new SKRect(cx - (rx * g), cy - (ry * g), cx + (rx * g), cy + (ry * g)), _fill);
+        }
+
+        // The dark "void" the clone steps through.
+        _fill.Color = new SKColor(0x07, 0x12, 0x24, (byte)(190 * alpha));
+        canvas.DrawOval(rect, _fill);
+
+        // Swirling energy arcs inside.
+        _stroke.Color = new SKColor(0xAF, 0xE6, 0xFF, (byte)(150 * alpha));
+        for (int i = 0; i < 3; i++)
+        {
+            _stroke.StrokeWidth = h * (0.014f - (i * 0.003f));
+            float ir = 0.92f - (i * 0.24f);
+            float start = (phase * 150f) + (i * 130f);
+            canvas.DrawArc(new SKRect(cx - (rx * ir), cy - (ry * ir), cx + (rx * ir), cy + (ry * ir)), start, 210f, false, _stroke);
+        }
+
+        // Bright double rim (white-hot core + cyan halo).
+        _stroke.Color = new SKColor(0x4F, 0xC4, 0xFF, (byte)(220 * alpha));
+        _stroke.StrokeWidth = h * 0.045f;
+        canvas.DrawOval(new SKRect(cx - (rx * 1.05f), cy - (ry * 1.05f), cx + (rx * 1.05f), cy + (ry * 1.05f)), _stroke);
+        _stroke.Color = new SKColor(0xEC, 0xFA, 0xFF, (byte)(235 * alpha));
+        _stroke.StrokeWidth = h * 0.022f;
+        canvas.DrawOval(rect, _stroke);
+    }
+
+    // ===================================================================
+    //  Imaginary held props — the generic "look what I've got" channel
+    // ===================================================================
+
+    private void DrawHeldProp(SKCanvas canvas, float h, HeldPropKind prop, float a)
+    {
+        switch (prop)
+        {
+            case HeldPropKind.Magnifier: DrawMagnifier(canvas, h, a); break;
+            case HeldPropKind.Balloon: DrawBalloon(canvas, h, a); break;
+            case HeldPropKind.Flag: DrawFlag(canvas, h, a); break;
+            case HeldPropKind.Flashlight: DrawFlashlight(canvas, h, a); break;
+            case HeldPropKind.IceCream: DrawIceCream(canvas, h, a); break;
+            case HeldPropKind.Mate: DrawMate(canvas, h, a); break;
+            case HeldPropKind.Binoculars: DrawBinoculars(canvas, h, a); break;
+            case HeldPropKind.PaintBrush: DrawPaintBrush(canvas, h, a); break;
+            case HeldPropKind.ToyHammer: DrawToyHammer(canvas, h, a); break;
+            case HeldPropKind.Sword: DrawSword(canvas, h, a); break;
+            case HeldPropKind.Kite: DrawKite(canvas, h, a); break;
+            case HeldPropKind.WateringCan: DrawWateringCan(canvas, h, a); break;
+            case HeldPropKind.Umbrella: DrawHeldUmbrella(canvas, h, a); break;
+            case HeldPropKind.Guitar: DrawGuitar(canvas, h, a); break;
+            case HeldPropKind.Camera: DrawCamera(canvas, h, a); break;
+            case HeldPropKind.Trophy: DrawTrophy(canvas, h, a); break;
+        }
+    }
+
+    private void DrawMagnifier(SKCanvas canvas, float h, float a)
+    {
+        // A magnifier held out to the right: glass ring + a stubby handle below it.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.54f * h, cy = -0.52f * h, r = 0.13f * h;
+
+        // Glass.
+        _fill.Color = new SKColor(0xCF, 0xE8, 0xFF, (byte)(120 * a));
+        canvas.DrawCircle(cx, cy, r * 0.78f, _fill);
+        // Rim.
+        _stroke.Color = new SKColor(0x3A, 0x3A, 0x40, alpha);
+        _stroke.StrokeWidth = h * 0.026f;
+        canvas.DrawCircle(cx, cy, r * 0.78f, _stroke);
+        // Handle (down-right from the rim).
+        _stroke.Color = new SKColor(0x7A, 0x4A, 0x2C, alpha);
+        _stroke.StrokeWidth = h * 0.03f;
+        float hx = cx + (r * 0.62f), hy = cy + (r * 0.62f);
+        canvas.DrawLine(hx, hy, hx + (0.10f * h), hy + (0.10f * h), _stroke);
+        // Glass glint.
+        _stroke.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)(180 * a));
+        _stroke.StrokeWidth = h * 0.012f;
+        canvas.DrawArc(new SKRect(cx - (r * 0.5f), cy - (r * 0.5f), cx + (r * 0.1f), cy + (r * 0.1f)), 160, 80, false, _stroke);
+    }
+
+    private void DrawBalloon(SKCanvas canvas, float h, float a)
+    {
+        // A balloon floating above-right on a string down to the body.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.40f * h, cy = -1.18f * h, rx = 0.16f * h, ry = 0.19f * h;
+
+        // String.
+        _stroke.Color = new SKColor(0x55, 0x55, 0x55, alpha);
+        _stroke.StrokeWidth = h * 0.008f;
+        using (var str = new SKPath())
+        {
+            str.MoveTo(cx, cy + ry);
+            str.QuadTo(cx + (0.05f * h), -0.75f * h, 0.18f * h, -0.5f * h);
+            canvas.DrawPath(str, _stroke);
+        }
+
+        // Body + knot + sheen.
+        _fill.Color = new SKColor(0xE0, 0x49, 0x4B, alpha);
+        canvas.DrawOval(new SKRect(cx - rx, cy - ry, cx + rx, cy + ry), _fill);
+        using (var knot = new SKPath())
+        {
+            knot.MoveTo(cx, cy + ry);
+            knot.LineTo(cx - (0.03f * h), cy + ry + (0.04f * h));
+            knot.LineTo(cx + (0.03f * h), cy + ry + (0.04f * h));
+            knot.Close();
+            canvas.DrawPath(knot, _fill);
+        }
+
+        _fill.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)(110 * a));
+        canvas.DrawOval(new SKRect(cx - (rx * 0.6f), cy - (ry * 0.7f), cx - (rx * 0.05f), cy - (ry * 0.1f)), _fill);
+    }
+
+    private void DrawFlag(SKCanvas canvas, float h, float a)
+    {
+        // A little pennant on a pole, fluttering to the right.
+        byte alpha = (byte)(255 * a);
+        float px = 0.50f * h, top = -0.95f * h, bottom = -0.30f * h;
+
+        _stroke.Color = new SKColor(0x8A, 0x6A, 0x4A, alpha);
+        _stroke.StrokeWidth = h * 0.018f;
+        canvas.DrawLine(px, top, px, bottom, _stroke);
+        _fill.Color = new SKColor(0xAB, 0x68, 0x3C, alpha); // finial knob
+        canvas.DrawCircle(px, top, h * 0.02f, _fill);
+
+        // Wavy pennant.
+        using var flag = new SKPath();
+        flag.MoveTo(px, top);
+        flag.LineTo(px + (0.26f * h), top + (0.05f * h));
+        flag.QuadTo(px + (0.18f * h), top + (0.11f * h), px + (0.27f * h), top + (0.16f * h));
+        flag.LineTo(px, top + (0.18f * h));
+        flag.Close();
+        _fill.Color = new SKColor(0x2E, 0x86, 0xD0, alpha);
+        canvas.DrawPath(flag, _fill);
+    }
+
+    private void DrawFlashlight(SKCanvas canvas, float h, float a)
+    {
+        // A torch with a soft light cone shining up-right.
+        byte alpha = (byte)(255 * a);
+        float bx = 0.46f * h, by = -0.42f * h;
+
+        // Light cone.
+        using (var cone = new SKPath())
+        {
+            cone.MoveTo(bx + (0.06f * h), by - (0.02f * h));
+            cone.LineTo(bx + (0.34f * h), by - (0.20f * h));
+            cone.LineTo(bx + (0.34f * h), by + (0.14f * h));
+            cone.Close();
+            _fill.Color = new SKColor(0xFF, 0xF2, 0x9E, (byte)(110 * a));
+            canvas.DrawPath(cone, _fill);
+        }
+
+        // Barrel + head (tilted up-right; rotate about the barrel since Skia's RotateRadians
+        // takes no pivot — translate in, rotate, translate back).
+        _fill.Color = new SKColor(0x37, 0x3B, 0x45, alpha);
+        canvas.Save();
+        canvas.Translate(bx, by);
+        canvas.RotateRadians(-0.5f);
+        canvas.Translate(-bx, -by);
+        canvas.DrawRoundRect(new SKRect(bx - (0.10f * h), by - (0.05f * h), bx + (0.06f * h), by + (0.05f * h)), h * 0.02f, h * 0.02f, _fill);
+        _fill.Color = new SKColor(0xB9, 0xC0, 0xCC, alpha);
+        canvas.DrawRoundRect(new SKRect(bx + (0.04f * h), by - (0.07f * h), bx + (0.10f * h), by + (0.07f * h)), h * 0.02f, h * 0.02f, _fill);
+        canvas.Restore();
+    }
+
+    private void DrawIceCream(SKCanvas canvas, float h, float a)
+    {
+        // A waffle cone with two scoops, held up to the right.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.52f * h, tipY = -0.30f * h;
+
+        // Cone.
+        using (var cone = new SKPath())
+        {
+            cone.MoveTo(cx, tipY);
+            cone.LineTo(cx - (0.08f * h), tipY - (0.16f * h));
+            cone.LineTo(cx + (0.08f * h), tipY - (0.16f * h));
+            cone.Close();
+            _fill.Color = new SKColor(0xD9, 0xA5, 0x5B, alpha);
+            canvas.DrawPath(cone, _fill);
+            _stroke.Color = new SKColor(0xB6, 0x82, 0x3E, alpha);
+            _stroke.StrokeWidth = h * 0.008f;
+            canvas.DrawLine(cx - (0.04f * h), tipY - (0.04f * h), cx + (0.02f * h), tipY - (0.13f * h), _stroke);
+            canvas.DrawLine(cx + (0.04f * h), tipY - (0.04f * h), cx - (0.02f * h), tipY - (0.13f * h), _stroke);
+        }
+
+        // Two scoops.
+        _fill.Color = new SKColor(0xF5, 0xB7, 0xC9, alpha);       // strawberry
+        canvas.DrawCircle(cx, tipY - (0.18f * h), 0.085f * h, _fill);
+        _fill.Color = new SKColor(0xFC, 0xF1, 0xD7, alpha);       // vanilla
+        canvas.DrawCircle(cx, tipY - (0.28f * h), 0.075f * h, _fill);
+    }
+
+    private void DrawMate(SKCanvas canvas, float h, float a)
+    {
+        // The Argentine classic: a gourd with a metal bombilla, a little steam.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.50f * h, cy = -0.40f * h, r = 0.11f * h;
+
+        // Gourd.
+        _fill.Color = new SKColor(0x6B, 0x44, 0x26, alpha);
+        canvas.DrawCircle(cx, cy, r, _fill);
+        _fill.Color = new SKColor(0x4E, 0x30, 0x1A, alpha);       // base shadow
+        canvas.DrawOval(new SKRect(cx - r, cy + (r * 0.25f), cx + r, cy + (r * 1.05f)), _fill);
+        // Yerba top.
+        _fill.Color = new SKColor(0x6F, 0x8A, 0x3C, alpha);
+        canvas.DrawOval(new SKRect(cx - (r * 0.8f), cy - (r * 0.95f), cx + (r * 0.8f), cy - (r * 0.35f)), _fill);
+        // Bombilla.
+        _stroke.Color = new SKColor(0xC9, 0xCE, 0xD6, alpha);
+        _stroke.StrokeWidth = h * 0.018f;
+        canvas.DrawLine(cx + (r * 0.2f), cy - (r * 0.6f), cx + (r * 1.3f), cy - (r * 1.5f), _stroke);
+        // Steam.
+        _stroke.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)(90 * a));
+        _stroke.StrokeWidth = h * 0.01f;
+        using var steam = new SKPath();
+        steam.MoveTo(cx, cy - r);
+        steam.QuadTo(cx + (0.04f * h), cy - (r * 1.6f), cx, cy - (r * 2.1f));
+        canvas.DrawPath(steam, _stroke);
+    }
+
+    private void DrawBinoculars(SKCanvas canvas, float h, float a)
+    {
+        // Two barrels held up to the eyes, with bright glass.
+        byte alpha = (byte)(255 * a);
+        float ey = -0.64f * h, dx = 0.13f * h, r = 0.10f * h;
+
+        for (int i = -1; i <= 1; i += 2)
+        {
+            float bx = i * dx;
+            _fill.Color = new SKColor(0x2B, 0x2E, 0x36, alpha);
+            canvas.DrawRoundRect(new SKRect(bx - (r * 0.8f), ey - (r * 1.1f), bx + (r * 0.8f), ey + (r * 1.1f)), r * 0.4f, r * 0.4f, _fill);
+            _fill.Color = new SKColor(0x9B, 0xD2, 0xFF, alpha);  // glass
+            canvas.DrawCircle(bx, ey + (r * 0.7f), r * 0.55f, _fill);
+        }
+
+        // Bridge.
+        _fill.Color = new SKColor(0x2B, 0x2E, 0x36, alpha);
+        canvas.DrawRect(new SKRect(-dx, ey - (r * 0.25f), dx, ey + (r * 0.25f)), _fill);
+    }
+
+    private void DrawPaintBrush(SKCanvas canvas, float h, float a)
+    {
+        // A brush held diagonally with a coloured tip and a little paint dab.
+        byte alpha = (byte)(255 * a);
+        float bx = 0.42f * h, by = -0.34f * h, tx = 0.60f * h, ty = -0.66f * h;
+
+        // Handle.
+        _stroke.Color = new SKColor(0x8A, 0x5A, 0x32, alpha);
+        _stroke.StrokeWidth = h * 0.03f;
+        _stroke.StrokeCap = SKStrokeCap.Round;
+        canvas.DrawLine(bx, by, tx - (0.05f * h), ty + (0.05f * h), _stroke);
+        // Ferrule.
+        _stroke.Color = new SKColor(0xB9, 0xC0, 0xCC, alpha);
+        _stroke.StrokeWidth = h * 0.034f;
+        canvas.DrawLine(tx - (0.08f * h), ty + (0.08f * h), tx - (0.03f * h), ty + (0.03f * h), _stroke);
+        _stroke.StrokeCap = SKStrokeCap.Round; // restore the shared paint's default cap
+        // Bristles.
+        _fill.Color = new SKColor(0xE0, 0x49, 0x4B, alpha);
+        using (var tip = new SKPath())
+        {
+            tip.MoveTo(tx - (0.05f * h), ty + (0.05f * h));
+            tip.LineTo(tx + (0.04f * h), ty - (0.03f * h));
+            tip.LineTo(tx + (0.01f * h), ty + (0.06f * h));
+            tip.Close();
+            canvas.DrawPath(tip, _fill);
+        }
+        // Paint dab.
+        canvas.DrawCircle(tx + (0.05f * h), ty - (0.02f * h), h * 0.02f, _fill);
+    }
+
+    private void DrawToyHammer(SKCanvas canvas, float h, float a)
+    {
+        // A chunky toy hammer: wooden handle + a bright two-tone head.
+        byte alpha = (byte)(255 * a);
+        float hx = 0.50f * h;
+
+        // Handle.
+        _fill.Color = new SKColor(0x9A, 0x67, 0x39, alpha);
+        canvas.DrawRoundRect(new SKRect(hx - (0.022f * h), -0.58f * h, hx + (0.022f * h), -0.26f * h), h * 0.02f, h * 0.02f, _fill);
+        // Head.
+        _fill.Color = new SKColor(0xE0, 0x49, 0x4B, alpha);
+        canvas.DrawRoundRect(new SKRect(hx - (0.12f * h), -0.70f * h, hx + (0.12f * h), -0.56f * h), h * 0.03f, h * 0.03f, _fill);
+        _fill.Color = new SKColor(0x2E, 0x86, 0xD0, alpha);
+        canvas.DrawRoundRect(new SKRect(hx - (0.12f * h), -0.63f * h, hx + (0.12f * h), -0.56f * h), h * 0.02f, h * 0.02f, _fill);
+    }
+
+    private void DrawSword(SKCanvas canvas, float h, float a)
+    {
+        // A cardboard sword held up — tan blade, a crossguard and a little grip.
+        byte alpha = (byte)(255 * a);
+        float gx = 0.44f * h, gy = -0.30f * h;   // grip base
+        float tx = 0.66f * h, ty = -0.98f * h;   // blade tip
+
+        // Blade.
+        _stroke.Color = new SKColor(0xD8, 0xC4, 0x9A, alpha);
+        _stroke.StrokeWidth = h * 0.045f;
+        _stroke.StrokeCap = SKStrokeCap.Round;
+        canvas.DrawLine(gx + (0.06f * h), gy - (0.06f * h), tx, ty, _stroke);
+        // Centre line.
+        _stroke.Color = new SKColor(0xB6, 0x9E, 0x6E, alpha);
+        _stroke.StrokeWidth = h * 0.012f;
+        canvas.DrawLine(gx + (0.07f * h), gy - (0.07f * h), tx - (0.01f * h), ty + (0.02f * h), _stroke);
+        _stroke.StrokeCap = SKStrokeCap.Round; // restore the shared paint's default cap
+        // Crossguard.
+        _stroke.Color = new SKColor(0x9A, 0x67, 0x39, alpha);
+        _stroke.StrokeWidth = h * 0.02f;
+        canvas.DrawLine(gx - (0.04f * h), gy - (0.12f * h), gx + (0.14f * h), gy + (0.02f * h), _stroke);
+        // Grip.
+        _stroke.StrokeWidth = h * 0.03f;
+        canvas.DrawLine(gx, gy, gx + (0.06f * h), gy - (0.06f * h), _stroke);
+    }
+
+    private void DrawKite(SKCanvas canvas, float h, float a)
+    {
+        // A diamond kite up and to the right, with a little bow tail and a string.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.56f * h, cy = -1.05f * h, w = 0.16f * h, ht = 0.22f * h;
+
+        // String down to the body.
+        _stroke.Color = new SKColor(0x66, 0x66, 0x66, alpha);
+        _stroke.StrokeWidth = h * 0.007f;
+        canvas.DrawLine(cx, cy + ht, 0.22f * h, -0.5f * h, _stroke);
+
+        using (var kite = new SKPath())
+        {
+            kite.MoveTo(cx, cy - ht);
+            kite.LineTo(cx + w, cy);
+            kite.LineTo(cx, cy + ht);
+            kite.LineTo(cx - w, cy);
+            kite.Close();
+            _fill.Color = new SKColor(0x46, 0xB1, 0x8A, alpha);
+            canvas.DrawPath(kite, _fill);
+            _stroke.Color = new SKColor(0x2C, 0x7C, 0x5E, alpha);
+            _stroke.StrokeWidth = h * 0.008f;
+            canvas.DrawLine(cx, cy - ht, cx, cy + ht, _stroke);
+            canvas.DrawLine(cx - w, cy, cx + w, cy, _stroke);
+        }
+
+        // Tail bows.
+        _fill.Color = new SKColor(0xE7, 0x9A, 0x3C, alpha);
+        for (int i = 1; i <= 3; i++)
+        {
+            float by = cy + ht + (i * 0.06f * h);
+            float bx = cx + (MathF.Sin(i * 1.3f) * 0.03f * h);
+            canvas.DrawCircle(bx, by, h * 0.014f, _fill);
+        }
+    }
+
+    private void DrawWateringCan(SKCanvas canvas, float h, float a)
+    {
+        // A watering can tilted to pour, with a few drops falling.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.46f * h, cy = -0.42f * h, w = 0.15f * h, ht = 0.13f * h;
+
+        // Body.
+        _fill.Color = new SKColor(0x4F, 0x9E, 0xC4, alpha);
+        canvas.DrawRoundRect(new SKRect(cx - (w / 2f), cy - (ht / 2f), cx + (w / 2f), cy + (ht / 2f)), h * 0.02f, h * 0.02f, _fill);
+        // Handle.
+        _stroke.Color = new SKColor(0x3C, 0x7E, 0x9E, alpha);
+        _stroke.StrokeWidth = h * 0.016f;
+        canvas.DrawArc(new SKRect(cx - (w * 0.3f), cy - (ht * 1.3f), cx + (w * 0.3f), cy - (ht * 0.1f)), 200, 140, false, _stroke);
+        // Spout.
+        _stroke.StrokeWidth = h * 0.02f;
+        canvas.DrawLine(cx + (w * 0.4f), cy, cx + (w * 0.95f), cy - (ht * 0.4f), _stroke);
+        // Rose (sprinkler head).
+        _fill.Color = new SKColor(0x3C, 0x7E, 0x9E, alpha);
+        canvas.DrawCircle(cx + (w * 0.95f), cy - (ht * 0.4f), h * 0.022f, _fill);
+        // Drops.
+        _fill.Color = new SKColor(0x9B, 0xD2, 0xFF, alpha);
+        for (int i = 0; i < 3; i++)
+        {
+            canvas.DrawCircle(cx + (w * 0.95f) + (i * 0.02f * h), cy + (i * 0.05f * h), h * 0.012f, _fill);
+        }
+    }
+
+    private void DrawHeldUmbrella(SKCanvas canvas, float h, float a)
+    {
+        // An open umbrella held up-right: a scalloped red canopy on a thin pole with a J-handle.
+        byte alpha = (byte)(255 * a);
+        float topX = 0.46f * h, topY = -1.04f * h;  // apex of the canopy
+        float r = 0.24f * h;                          // canopy radius
+        float baseY = topY + (0.16f * h);             // where the canopy rim sits
+
+        // Pole down to a curved handle.
+        _stroke.Color = new SKColor(0x6A, 0x4A, 0x32, alpha);
+        _stroke.StrokeWidth = h * 0.018f;
+        float poleBottom = -0.34f * h;
+        canvas.DrawLine(topX, topY, topX, poleBottom, _stroke);
+        canvas.DrawArc(new SKRect(topX - (0.10f * h), poleBottom - (0.02f * h), topX, poleBottom + (0.06f * h)), 0, 180, false, _stroke);
+
+        // Canopy: a half-dome with a scalloped lower edge.
+        using var dome = new SKPath();
+        dome.MoveTo(topX - r, baseY);
+        dome.ArcTo(new SKRect(topX - r, topY, topX + r, baseY + (r * 0.9f)), 180, 180, false);
+        // Scallops along the bottom rim (4 little arcs).
+        const int scallops = 4;
+        float step = (2f * r) / scallops;
+        for (int i = 0; i < scallops; i++)
+        {
+            float sx = topX + r - (i * step);
+            dome.QuadTo(sx - (step * 0.5f), baseY + (0.05f * h), sx - step, baseY);
+        }
+
+        dome.Close();
+        _fill.Color = new SKColor(0xD2, 0x3F, 0x3F, alpha);
+        canvas.DrawPath(dome, _fill);
+
+        // A couple of rib lines + a tip finial for definition.
+        _stroke.Color = new SKColor(0xA8, 0x2E, 0x2E, alpha);
+        _stroke.StrokeWidth = h * 0.01f;
+        canvas.DrawLine(topX, topY, topX - (r * 0.55f), baseY, _stroke);
+        canvas.DrawLine(topX, topY, topX + (r * 0.55f), baseY, _stroke);
+        _fill.Color = new SKColor(0xA8, 0x2E, 0x2E, alpha);
+        canvas.DrawCircle(topX, topY - (0.02f * h), h * 0.018f, _fill);
+    }
+
+    private void DrawGuitar(SKCanvas canvas, float h, float a)
+    {
+        // A little acoustic guitar held across the body, neck pointing up-right.
+        byte alpha = (byte)(255 * a);
+        float bx = 0.30f * h, by = -0.30f * h;       // body (sound box) centre
+        float bodyR = 0.16f * h;
+
+        // Body: a figure-eight from two overlapping ovals (lower bout bigger).
+        _fill.Color = new SKColor(0xC8, 0x88, 0x3E, alpha);
+        canvas.DrawOval(new SKRect(bx - (bodyR * 0.78f), by - (bodyR * 0.55f), bx + (bodyR * 0.78f), by + (bodyR * 0.1f)), _fill);
+        canvas.DrawOval(new SKRect(bx - bodyR, by - (bodyR * 0.1f), bx + bodyR, by + bodyR), _fill);
+
+        // Sound hole.
+        _fill.Color = new SKColor(0x4A, 0x2E, 0x16, alpha);
+        canvas.DrawCircle(bx, by + (bodyR * 0.28f), h * 0.04f, _fill);
+
+        // Neck + head up to the right.
+        _stroke.Color = new SKColor(0x7A, 0x52, 0x2C, alpha);
+        _stroke.StrokeWidth = h * 0.05f;
+        float nx = bx + (0.34f * h), ny = by - (0.34f * h);
+        canvas.DrawLine(bx + (bodyR * 0.5f), by - (bodyR * 0.4f), nx, ny, _stroke);
+        _fill.Color = new SKColor(0x4A, 0x2E, 0x16, alpha);
+        canvas.DrawCircle(nx, ny, h * 0.035f, _fill); // headstock
+
+        // A few strings along the neck.
+        _stroke.Color = new SKColor(0xF0, 0xE8, 0xD8, (byte)(200 * a));
+        _stroke.StrokeWidth = h * 0.006f;
+        for (int i = -1; i <= 1; i++)
+        {
+            float off = i * 0.012f * h;
+            canvas.DrawLine(bx + (bodyR * 0.45f) + off, by - (bodyR * 0.45f) - off, nx + off, ny + off, _stroke);
+        }
+    }
+
+    private void DrawCamera(SKCanvas canvas, float h, float a)
+    {
+        // A retro camera held up to "take a photo", with a flash pop.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.50f * h, cy = -0.52f * h, w = 0.20f * h, ht = 0.13f * h;
+
+        // Body.
+        _fill.Color = new SKColor(0x35, 0x38, 0x40, alpha);
+        canvas.DrawRoundRect(new SKRect(cx - (w / 2f), cy - (ht / 2f), cx + (w / 2f), cy + (ht / 2f)), h * 0.02f, h * 0.02f, _fill);
+        // Top viewfinder hump.
+        canvas.DrawRoundRect(new SKRect(cx - (w * 0.18f), cy - (ht * 0.85f), cx + (w * 0.12f), cy - (ht * 0.4f)), h * 0.01f, h * 0.01f, _fill);
+        // Lens.
+        _fill.Color = new SKColor(0x1B, 0x1D, 0x22, alpha);
+        canvas.DrawCircle(cx, cy + (ht * 0.05f), h * 0.05f, _fill);
+        _fill.Color = new SKColor(0x4F, 0x7E, 0xB0, (byte)(220 * a)); // glass
+        canvas.DrawCircle(cx, cy + (ht * 0.05f), h * 0.03f, _fill);
+        // Shutter button.
+        _fill.Color = new SKColor(0xC0, 0x40, 0x40, alpha);
+        canvas.DrawCircle(cx + (w * 0.32f), cy - (ht * 0.55f), h * 0.014f, _fill);
+        // Flash pop (up-right of the camera).
+        _fill.Color = new SKColor(0xFF, 0xFB, 0xD0, (byte)(190 * a));
+        DrawSparkleStar(canvas, cx + (w * 0.45f), cy - (ht * 1.1f), h * 0.06f, _fill.Color);
+    }
+
+    private void DrawTrophy(SKCanvas canvas, float h, float a)
+    {
+        // A golden trophy held up proudly, with a sparkle.
+        byte alpha = (byte)(255 * a);
+        float cx = 0.50f * h, cupTop = -0.74f * h, cupBottom = -0.52f * h, cupW = 0.18f * h;
+        var gold = new SKColor(0xE6, 0xB8, 0x3A, alpha);
+        var goldDark = new SKColor(0xB8, 0x8E, 0x22, alpha);
+
+        // Cup bowl (a trapezoid that narrows downward).
+        using (var cup = new SKPath())
+        {
+            cup.MoveTo(cx - (cupW / 2f), cupTop);
+            cup.LineTo(cx + (cupW / 2f), cupTop);
+            cup.LineTo(cx + (cupW * 0.28f), cupBottom);
+            cup.LineTo(cx - (cupW * 0.28f), cupBottom);
+            cup.Close();
+            _fill.Color = gold;
+            canvas.DrawPath(cup, _fill);
+        }
+
+        // Handles (two C-arcs).
+        _stroke.Color = goldDark;
+        _stroke.StrokeWidth = h * 0.018f;
+        canvas.DrawArc(new SKRect(cx - (cupW * 0.85f), cupTop, cx - (cupW * 0.3f), cupBottom), 90, 180, false, _stroke);
+        canvas.DrawArc(new SKRect(cx + (cupW * 0.3f), cupTop, cx + (cupW * 0.85f), cupBottom), 270, 180, false, _stroke);
+
+        // Stem + base.
+        _fill.Color = goldDark;
+        canvas.DrawRect(new SKRect(cx - (0.02f * h), cupBottom, cx + (0.02f * h), cupBottom + (0.06f * h)), _fill);
+        canvas.DrawRoundRect(new SKRect(cx - (0.07f * h), cupBottom + (0.06f * h), cx + (0.07f * h), cupBottom + (0.10f * h)), h * 0.01f, h * 0.01f, _fill);
+
+        // Shine + a tiny sparkle.
+        _fill.Color = new SKColor(0xFF, 0xF4, 0xC8, (byte)(150 * a));
+        canvas.DrawRect(new SKRect(cx - (cupW * 0.32f), cupTop + (0.02f * h), cx - (cupW * 0.18f), cupBottom - (0.02f * h)), _fill);
+        DrawSparkleStar(canvas, cx + (cupW * 0.5f), cupTop - (0.02f * h), h * 0.045f, new SKColor(0xFF, 0xFF, 0xFF, (byte)(220 * a)));
+    }
+
+    /// <summary>A simple 4-point twinkle (two crossed tapered spokes) used by props that pop.</summary>
+    private void DrawSparkleStar(SKCanvas canvas, float x, float y, float r, SKColor color)
+    {
+        _stroke.Color = color;
+        _stroke.StrokeWidth = r * 0.28f;
+        canvas.DrawLine(x - r, y, x + r, y, _stroke);
+        canvas.DrawLine(x, y - r, x, y + r, _stroke);
+        _stroke.StrokeWidth = r * 0.16f;
+        float d = r * 0.6f;
+        canvas.DrawLine(x - d, y - d, x + d, y + d, _stroke);
+        canvas.DrawLine(x - d, y + d, x + d, y - d, _stroke);
     }
 
     private void DrawThermometer(SKCanvas canvas, float h, float a)

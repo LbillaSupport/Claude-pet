@@ -6,6 +6,13 @@ namespace ClaudeBuddy.UI;
 /// <summary>A skin entry shown in the menu.</summary>
 public readonly record struct SkinMenuItem(string Id, string Name, bool IsCurrent);
 
+/// <summary>
+/// One playable animation in the "Play Animation" submenu. <see cref="Id"/> is the
+/// behaviour id the engine force-plays; <see cref="Category"/> groups items into
+/// sub-sub-menus; <see cref="Name"/> is the human label.
+/// </summary>
+public readonly record struct AnimationMenuItem(string Id, string Name, string Category);
+
 /// <summary>Everything the menu needs to render its current toggle/selection states.</summary>
 public sealed class MenuState
 {
@@ -19,6 +26,7 @@ public sealed class MenuState
     public float Volume { get; init; } = 0.7f;
     public float BehaviorFrequency { get; init; } = 1f;
     public IReadOnlyList<SkinMenuItem> Skins { get; init; } = Array.Empty<SkinMenuItem>();
+    public IReadOnlyList<AnimationMenuItem> Animations { get; init; } = Array.Empty<AnimationMenuItem>();
 }
 
 /// <summary>The user's choice, decoded back into something the engine can act on.</summary>
@@ -37,6 +45,7 @@ public sealed class ContextMenu
     private const uint SpeedBase = 1100;
     private const uint VolumeBase = 1200;
     private const uint FreqBase = 1300;
+    private const uint AnimBase = 2000; // "Play Animation" items: AnimBase + index into MenuState.Animations
 
     private static readonly float[] SpeedPresets = { 0.5f, 0.75f, 1f, 1.5f, 2f };
     private static readonly float[] FreqPresets = { 0.5f, 1f, 1.5f, 2f };
@@ -56,6 +65,10 @@ public sealed class ContextMenu
             AppendSub(menu, "Animation Speed", BuildPresetMenu(SpeedBase, SpeedPresets, state.AnimationSpeed, v => $"{v:0.##}x", subMenus));
             AppendSub(menu, "Behaviour Frequency", BuildFreqMenu(state, subMenus));
             // No Volume / Mute entries: the app is silent by design (no audio).
+            Separator(menu);
+
+            // Dev/showcase: force-play any single animation to review (and tweak) it.
+            AppendSub(menu, "Play Animation", BuildAnimationMenu(state, subMenus));
             Separator(menu);
 
             Check(menu, MenuCommand.ToggleAlwaysOnTop, "Always On Top", state.AlwaysOnTop);
@@ -120,6 +133,14 @@ public sealed class ContextMenu
             return new MenuSelection(MenuCommand.BehaviorFrequency, Value: FreqPresets[(int)(id - FreqBase)]);
         }
 
+        if (id >= AnimBase)
+        {
+            int i = (int)(id - AnimBase);
+            return i >= 0 && i < state.Animations.Count
+                ? new MenuSelection(MenuCommand.PlayAnimation, state.Animations[i].Id)
+                : new MenuSelection(MenuCommand.None);
+        }
+
         return new MenuSelection((MenuCommand)id);
     }
 
@@ -135,6 +156,48 @@ public sealed class ContextMenu
         }
 
         return sub;
+    }
+
+    /// <summary>
+    /// Builds the "Play Animation" submenu: items are grouped into per-category sub-sub-menus
+    /// (Idle, Playful, …) so the long list stays browsable. Each leaf carries AnimBase + its
+    /// index into <see cref="MenuState.Animations"/>, decoded back to the behaviour id.
+    /// </summary>
+    private static IntPtr BuildAnimationMenu(MenuState state, List<IntPtr> owned)
+    {
+        IntPtr root = NativeMethods.CreatePopupMenu();
+        owned.Add(root);
+
+        // Group by category, preserving first-seen order of both categories and items so the
+        // menu mirrors the catalogue's curated ordering.
+        var categories = new List<string>();
+        var byCategory = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        for (int i = 0; i < state.Animations.Count; i++)
+        {
+            string cat = state.Animations[i].Category;
+            if (!byCategory.TryGetValue(cat, out List<int>? indices))
+            {
+                indices = new List<int>();
+                byCategory[cat] = indices;
+                categories.Add(cat);
+            }
+
+            indices.Add(i);
+        }
+
+        foreach (string cat in categories)
+        {
+            IntPtr sub = NativeMethods.CreatePopupMenu();
+            owned.Add(sub);
+            foreach (int i in byCategory[cat])
+            {
+                NativeMethods.AppendMenu(sub, NativeMethods.MF_STRING, (UIntPtr)(AnimBase + (uint)i), state.Animations[i].Name);
+            }
+
+            AppendSub(root, cat, sub);
+        }
+
+        return root;
     }
 
     private static IntPtr BuildPresetMenu(uint baseId, float[] presets, float current, Func<float, string> label, List<IntPtr> owned)

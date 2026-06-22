@@ -116,6 +116,82 @@ public sealed class Skin
         },
     };
 
+    /// <summary>Always-available "Among Us" crewmate.</summary>
+    public static Skin AmongUs => new()
+    {
+        Id = "amongus",
+        Name = "Among Us",
+        Author = "Claude Buddy",
+        Palette = new SkinPalette
+        {
+            Style = SkinStyle.AmongUs,
+            Body = new RgbaColor(0xC5, 0x1F, 0x24),        // classic red crewmate
+            BodyShadow = new RgbaColor(0x9A, 0x16, 0x1B),  // darker red (shadow + legs)
+            Belly = new RgbaColor(0x9C, 0xD3, 0xE6),       // visor glass (light blue)
+            Pupil = new RgbaColor(0x2A, 0x44, 0x55),       // visor frame / dark
+            Accent = new RgbaColor(0xEF, 0x5A, 0x5F),       // backpack highlight
+            HudHeadroom = 1.18f,
+        },
+    };
+
+    /// <summary>Always-available "Pikachu".</summary>
+    public static Skin Pikachu => new()
+    {
+        Id = "pikachu",
+        Name = "Pikachu",
+        Author = "Claude Buddy",
+        Palette = new SkinPalette
+        {
+            Style = SkinStyle.Pikachu,
+            Body = new RgbaColor(0xF6, 0xD0, 0x2F),        // pikachu yellow
+            BodyShadow = new RgbaColor(0xD9, 0xA4, 0x1A),  // ear tips / tan shadow
+            Belly = new RgbaColor(0xFF, 0xE2, 0x66),       // lighter yellow sheen
+            Pupil = new RgbaColor(0x20, 0x18, 0x14),       // black eyes
+            Mouth = new RgbaColor(0x6A, 0x32, 0x22),
+            Blush = new RgbaColor(0xE8, 0x4C, 0x3D),        // red cheeks
+            Accent = new RgbaColor(0xB0, 0x4A, 0x16),       // brown back stripes
+            HudHeadroom = 1.42f,                            // clear the tall ears
+        },
+    };
+
+    /// <summary>Always-available "Mate": a big friendly Argentine mate gourd with a bombilla.</summary>
+    public static Skin Mate => new()
+    {
+        Id = "mate",
+        Name = "Mate",
+        Author = "Claude Buddy",
+        Palette = new SkinPalette
+        {
+            Style = SkinStyle.Mate,
+            Body = new RgbaColor(0x6E, 0x44, 0x22),        // gourd brown
+            BodyShadow = new RgbaColor(0x53, 0x31, 0x18),  // darker brown
+            Belly = new RgbaColor(0x3E, 0x8E, 0x4F),        // green yerba on top
+            Pupil = new RgbaColor(0x20, 0x16, 0x10),
+            Mouth = new RgbaColor(0x3A, 0x24, 0x16),
+            Blush = new RgbaColor(0xC9, 0x86, 0x52),
+            Accent = new RgbaColor(0xC9, 0xCD, 0xD2),       // metal bombilla
+            HudHeadroom = 1.30f,                            // clear the bombilla sticking up
+        },
+    };
+
+    /// <summary>Always-available "Ghost": a friendly Pac-Man-style ghost.</summary>
+    public static Skin Ghost => new()
+    {
+        Id = "ghost",
+        Name = "Ghost",
+        Author = "Claude Buddy",
+        Palette = new SkinPalette
+        {
+            Style = SkinStyle.Ghost,
+            Body = new RgbaColor(0xF2, 0x4B, 0xC2),        // pinky-style pink
+            BodyShadow = new RgbaColor(0xCB, 0x36, 0xA1),
+            Belly = new RgbaColor(0xFF, 0xFF, 0xFF),        // white eye whites
+            Pupil = new RgbaColor(0x21, 0x2C, 0x84),        // classic blue pupils
+            Accent = new RgbaColor(0xFF, 0xC0, 0xE8),
+            HudHeadroom = 1.06f,
+        },
+    };
+
     /// <summary>Always-available "Galgo": the smiley line-34 city bus in a Vélez hat.</summary>
     public static Skin Galgo => new()
     {

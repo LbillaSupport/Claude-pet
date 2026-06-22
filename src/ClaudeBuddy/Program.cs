@@ -1,6 +1,7 @@
 using ClaudeBuddy.Achievements;
 using ClaudeBuddy.Animation;
 using ClaudeBuddy.Behaviors;
+using ClaudeBuddy.Content;
 using ClaudeBuddy.Core;
 using ClaudeBuddy.Emotions;
 using ClaudeBuddy.Engine;
@@ -95,6 +96,7 @@ internal static class Program
         // Shared infrastructure.
         services.AddSingleton<Rng>();
         services.AddSingleton<GameTime>();
+        services.AddSingleton<Phrasebook>();
 
         // World / entity / simulation systems.
         services.AddSingleton<World>();
@@ -127,6 +129,8 @@ internal static class Program
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<SessionUsageService>();
         services.AddSingleton<WorldDataService>();
+        services.AddSingleton<DesktopProbe>();
+        services.AddSingleton<SystemAudioProbe>();
         services.AddSingleton<UpdateService>();
         services.AddSingleton<IClaudeLauncher, ClaudeLauncher>();
         services.AddSingleton<IStartupService, StartupService>();
@@ -169,6 +173,11 @@ internal static class Program
 
                 pose = animator.Current;
             }
+            else if (Enum.TryParse<HeldPropKind>(prop, ignoreCase: true, out HeldPropKind held) && held != HeldPropKind.None)
+            {
+                // Preview a held imaginary prop on a neutral, presenting pose.
+                pose = new Pose { MouthCurve = 0.55f, MouthOpen = 0.12f, ArmRight = 1.7f, HeldProp = held, HeldPropAmount = 1f };
+            }
             else
             {
                 pose = new Pose { MouthCurve = 0.7f, MouthOpen = 0.2f };
@@ -183,6 +192,34 @@ internal static class Program
             float height = size * 0.42f;             // leave headroom for hats/buses
             artist.Draw(surface.Canvas, new SkiaSharp.SKPoint(anchorX, anchorY), anchorY,
                 height, Facing.Right, 1f, 1f, pose, skins.Current.Palette, 1f);
+
+            // QA: `--render <skin> out.png <sz> bubble` also draws a battery + a deliberately
+            // long speech bubble so the word-wrap / no-clip / upright-battery fixes can be
+            // verified deterministically.
+            if (prop == "bubble" || prop == "bubbleedge")
+            {
+                var hud = new UsageHudRenderer();
+                float headroom = skins.Current.Palette.HudHeadroom;
+                float by = anchorY - (headroom * height);
+
+                // "bubbleedge" simulates the crab hugging the RIGHT screen edge: only the left
+                // ~45% of the window is on-screen, so the HUD must stay inside that slice.
+                float visLeft = 0f;
+                float visRight = prop == "bubbleedge" ? size * 0.45f : size;
+                float bx = MathF.Min(anchorX, visRight - (27f));
+
+                hud.DrawBattery(surface.Canvas, new SkiaSharp.SKPoint(bx, by), 1f, 0.62f, charging: false, pulse: 0f);
+                hud.DrawBubble(surface.Canvas, new SkiaSharp.SKPoint(bx, by - 32f), 1f,
+                    "¡Buenas tardes! ¡Feliz viernes! ¿Sabías que los pulpos tienen tres corazones?", 1f, visLeft, visRight);
+            }
+
+            // QA: `--render <skin> out.png <sz> portal` draws a Portal-style portal beside the
+            // character so the clone-event art can be checked deterministically.
+            if (prop == "portal")
+            {
+                artist.DrawPortal(surface.Canvas, anchorX + (0.42f * size), anchorY - (0.22f * size),
+                    height, scale: 1f, alpha: 1f, phase: 0.3f);
+            }
 
             using SkiaSharp.SKImage image = surface.Snapshot();
             using SkiaSharp.SKData data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);

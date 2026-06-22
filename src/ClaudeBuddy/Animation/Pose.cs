@@ -76,6 +76,12 @@ public sealed class Pose
     public float ThermometerProp; // 0..1 icy thermometer (cold weather reaction)
     public float FanProp;        // 0..1 hand fan (hot weather reaction)
 
+    /// <summary>Which imaginary prop is held (None = nothing). Set directly, not blended.</summary>
+    public Core.HeldPropKind HeldProp;
+
+    /// <summary>0..1 visibility of the held imaginary prop (fades the current HeldProp in/out).</summary>
+    public float HeldPropAmount;
+
     /// <summary>Copies another pose's values into this instance (no allocation).</summary>
     public void CopyFrom(Pose other)
     {
@@ -107,5 +113,7 @@ public sealed class Pose
         SleepBubble = other.SleepBubble;
         ThermometerProp = other.ThermometerProp;
         FanProp = other.FanProp;
+        HeldProp = other.HeldProp;
+        HeldPropAmount = other.HeldPropAmount;
     }
 }

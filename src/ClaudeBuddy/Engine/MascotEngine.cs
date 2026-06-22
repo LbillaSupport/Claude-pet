@@ -2,6 +2,7 @@ using System.Diagnostics;
 using ClaudeBuddy.Achievements;
 using ClaudeBuddy.Animation;
 using ClaudeBuddy.Behaviors;
+using ClaudeBuddy.Content;
 using ClaudeBuddy.Core;
 using ClaudeBuddy.Emotions;
 using ClaudeBuddy.Input;
@@ -43,6 +44,8 @@ public sealed class MascotEngine
     private readonly KeyboardActivityTracker _keyboard;
     private readonly SessionUsageService _usage;
     private readonly WorldDataService _worldData;
+    private readonly DesktopProbe _desktop;
+    private readonly SystemAudioProbe _audioProbe;
     private readonly UsageHudRenderer _hud;
     private readonly SkinManager _skins;
     private readonly ModManager _mods;
@@ -51,6 +54,7 @@ public sealed class MascotEngine
     private readonly IAudioService _audio;
     private readonly AchievementService _achievements;
     private readonly ContextMenu _menu;
+    private readonly Phrasebook _phrasebook;
     private readonly Rng _rng;
     private readonly GameTime _time;
 
@@ -78,6 +82,16 @@ public sealed class MascotEngine
     private bool _dizzyShowing;           // a dizzy reaction is currently playing
     private float _impactCooldown;        // debounces collision reactions so a bounce-storm can't lag
 
+    // Micro-interaction state (cursor play + tickling).
+    private int _tickleCount;          // rapid double-clicks in a row → a fit of giggles
+    private double _lastTickleTime;
+    private float _orbitAccum;         // radians of cursor circling the mascot (→ dizziness)
+    private float _lastCursorAngle;
+    private bool _orbitArmed;
+    private float _ruffleCd;           // debounce for the close fast-flick "ruffle"
+    private float _pawHover;           // seconds the cursor has rested still right beside it
+    private float _pawCd;              // debounce so "give a paw" doesn't re-trigger constantly
+
     private bool _photoMode;
     private bool _claudeWasRunning;
     private float _surpriseCd;
@@ -104,9 +118,43 @@ public sealed class MascotEngine
     // every ~half-minute — lively without being spammy.
     private float _weatherReactCooldown = 8f;
     private WeatherMood _lastWeather = WeatherMood.Unknown;
-    private float _factCooldown = 15f;
     private int _factIndex;
     private string _celebratedHoliday = string.Empty; // last holiday we celebrated
+
+    // Ambient personality chatter (always on, independent of WorldData/battery). Plus an
+    // idle meter — how long since the user last moved the mouse or typed — so Claw'd can
+    // notice when you've wandered off and say something about it.
+    private float _chatterCooldown = 18f;
+    private float _idleSeconds;
+    private int _returnDays;          // days since last seen, captured at launch
+    private bool _returnGreeted;      // a "welcome back" line is still pending
+    private float _chainCooldown = 50f; // until the next spontaneous behaviour "story"
+    private float _rareCooldown = 420f; // until the next rare "special moment"
+    private float _desktopCooldown = 90f; // until the next real-desktop interaction (clock…)
+
+    // ---- Real-desktop reactions (active window + system volume) ----
+    private IntPtr _lastForeground;       // last foreground window seen (to notice app switches)
+    private float _windowReactCd;         // debounce for the active-window reaction
+    private bool _foregroundSeeded;       // skip the very first reading (it's not a "change")
+    private float _volumePollAcc;         // accumulates dt; we only read the volume periodically
+    private float _lastVolume = -1f;      // last master volume read (-1 = not read yet)
+    private float _volumeReactCd;         // debounce for the volume reaction
+
+    // ---- Portal clone event (a second character, anywhere on screen, that falls in) ----
+    private enum ClonePhase { Idle, Opening, Drop, Linger, ExitOpen, ExitClose }
+
+    private ClonePhase _clonePhase = ClonePhase.Idle;
+    private float _cloneTimer;
+    private float _cloneCooldown = 40f;            // first clone ~40s after launch (a little demo), then rare
+    private LayeredWindow _cloneWindow = null!;    // its own click-through overlay that follows it
+    private SkiaRenderer _cloneRenderer = null!;
+    private readonly Mascot _cloneMascot = new();
+    private readonly Animator _cloneAnimator;      // built in the ctor (needs the Rng)
+    private readonly EmotionState _cloneEmotion = new();
+    private readonly PhysicsSystem _clonePhysics = new(); // its OWN physics so it never triggers Claw'd's reactions
+    private float _portalX, _portalY, _portalScale, _portalAlpha;
+    private float _cloneAlpha;
+    private bool _cloneReacted;
 
     // Short reactions and mid-air moves that "type along" must not interrupt.
     private static readonly HashSet<string> TypingNonInterruptible = new(StringComparer.OrdinalIgnoreCase)
@@ -122,9 +170,11 @@ public sealed class MascotEngine
         EmotionState emotion, DailyRoutine routine, ParticleSystem particles,
         ParticleRenderer particleRenderer, CharacterArtist artist, CursorTracker cursor,
         KeyboardActivityTracker keyboard, SessionUsageService usage, UsageHudRenderer hud,
-        WorldDataService worldData, SkinManager skins, ModManager mods,
+        WorldDataService worldData, DesktopProbe desktop, SystemAudioProbe audioProbe,
+        SkinManager skins, ModManager mods,
         IClaudeLauncher claude, IStartupService startup,
-        IAudioService audio, AchievementService achievements, ContextMenu menu, Rng rng, GameTime time)
+        IAudioService audio, AchievementService achievements, ContextMenu menu,
+        Phrasebook phrasebook, Rng rng, GameTime time)
     {
         _settings = settings;
         _world = world;
@@ -142,6 +192,8 @@ public sealed class MascotEngine
         _keyboard = keyboard;
         _usage = usage;
         _worldData = worldData;
+        _desktop = desktop;
+        _audioProbe = audioProbe;
         _hud = hud;
         _skins = skins;
         _mods = mods;
@@ -150,8 +202,10 @@ public sealed class MascotEngine
         _audio = audio;
         _achievements = achievements;
         _menu = menu;
+        _phrasebook = phrasebook;
         _rng = rng;
         _time = time;
+        _cloneAnimator = new Animator(rng);
     }
 
     public void Initialize(LayeredWindow window, SkiaRenderer renderer)
@@ -159,6 +213,13 @@ public sealed class MascotEngine
         _window = window;
         _renderer = renderer;
         _world.SetDpiScale(window.DpiScale);
+
+        // The portal clone gets its own passive, click-through overlay (same size as Claw'd's)
+        // that follows it, so it can fall in and roam ANYWHERE on screen, not just inside
+        // Claw'd's little window. Created hidden; shown only during the event.
+        _cloneWindow = new LayeredWindow("ClaudeBuddyCloneWindowClass", passive: true);
+        _cloneWindow.Create(EngineConstants.CanvasDesignSize);
+        _cloneRenderer = new SkiaRenderer(_renderer.Size);
 
         // Content discovery.
         _skins.Discover(_settings.SettingsDirectory);
@@ -170,6 +231,15 @@ public sealed class MascotEngine
         _emotion.Happiness = S.Happiness;
         _mascot.Scale = MathUtil.Clamp(S.Scale, 0.6f, 1.8f);
         RestorePosition();
+
+        // "Memory": how long has it been since we last ran? If it's been a day or more,
+        // Claw'd greets the user back warmly a little later. Captured before the first
+        // save overwrites LastSeenUtc.
+        if (S.Stats.LastSeenUtc > DateTimeOffset.MinValue)
+        {
+            _returnDays = (int)(DateTimeOffset.UtcNow - S.Stats.LastSeenUtc).TotalDays;
+            _returnGreeted = _returnDays >= 1;
+        }
 
         // Wire events.
         _window.LeftButtonDown += OnLeftDown;
@@ -219,8 +289,21 @@ public sealed class MascotEngine
         _cursor.Update(dt);
         _keyboard.Update(dt);
         _animator.SetTypingIntensity(_keyboard.Intensity);
+
+        // Idle meter: how long since the user last did anything. Resets on the slightest
+        // mouse movement or any typing; otherwise it grows so Claw'd can notice you're away.
+        if (_cursor.Speed > EngineConstants.IdleCursorSpeed * dpi || _keyboard.IsTyping)
+        {
+            _idleSeconds = 0f;
+        }
+        else
+        {
+            _idleSeconds += dt;
+        }
+
         UpdateUsageReactions(dt);
         UpdateWorldDataReactions(dt);
+        UpdateChatter(dt);
         RoutineProfile routine = _routine.Evaluate();
 
         // --- Interaction timing -----------------------------------------
@@ -266,8 +349,14 @@ public sealed class MascotEngine
         // --- Core simulation --------------------------------------------
         if (brainAwake)
         {
+            UpdateCursorMicro(dt, dpi);
             _behavior.Update(_mascot, _world, _emotion, routine, _cursor.Position, dt, S.BehaviorFrequency);
             UpdateTypingReaction();
+            MaybeStartChain(dt);
+            MaybeRareEvent(dt);
+            MaybeDesktopInteraction(dt);
+            UpdateDesktopReactions(dt);
+            MaybeStartCloneEvent(dt);
         }
 
         if (physicsAwake)
@@ -287,6 +376,7 @@ public sealed class MascotEngine
             _particles.Update(dt);
             UpdateWeather(dt);
             AccumulateStats(dt);
+            UpdateCloneEvent(dt); // advance the portal/clone state machine + its own physics
         }
 
         // --- Periodic housekeeping --------------------------------------
@@ -306,6 +396,10 @@ public sealed class MascotEngine
         }
 
         Render(dpi);
+        if (_clonePhase != ClonePhase.Idle)
+        {
+            RenderClone(dpi);
+        }
     }
 
     public void Shutdown()
@@ -313,6 +407,8 @@ public sealed class MascotEngine
         _keyboard.Stop();
         _usage.Stop();
         _worldData.Stop();
+        _cloneWindow?.Hide();
+        _cloneRenderer?.Dispose();
         PersistAndSave();
     }
 
@@ -408,32 +504,41 @@ public sealed class MascotEngine
             return;
         }
 
-        // The BATTERY tracks the body's "up" direction so it rides onto walls/ceilings
-        // alongside the crab (headroom is per-skin to clear tall hats).
+        // The HUD is always drawn SCREEN-UPRIGHT and stacked straight UP above the body in
+        // SCREEN space — never along the body's up-vector. Anchoring it to the rotating
+        // up-vector made the battery fly off sideways (reading as "vertical") when the crab
+        // clung to a wall; this keeps it horizontal and above the crab in every orientation.
         float ang = _renderSurfaceAngle;
         float headroom = _skins.Current.Palette.HudHeadroom;
-        var up = new SKPoint(MathF.Sin(ang), -MathF.Cos(ang));
-        var head = new SKPoint(feet.X + (up.X * headroom * height), feet.Y + (up.Y * headroom * height));
+        float stackY = feet.Y - (headroom * height); // just above the body, in screen space
+
+        // The window is centred on the crab, so when it hugs a screen edge the window (and a
+        // bubble drawn in it) spills OFF the monitor and gets clipped by the screen. Compute
+        // the on-screen slice of the canvas and keep the HUD inside it, so it slides away
+        // from the edge instead of running off it.
+        float winX = _mascot.Position.X - feet.X; // screen X of the window's left edge
+        float visLeft = MathUtil.Clamp(_world.LeftWall - winX, 0f, canvasSize);
+        float visRight = MathUtil.Clamp(_world.RightWall - winX, 0f, canvasSize);
+        if (visRight - visLeft < 40f * dpi) // degenerate (off-screen) — fall back to the canvas
+        {
+            visLeft = 0f;
+            visRight = canvasSize;
+        }
+
+        float bodyCenterX = feet.X + (MathF.Sin(ang) * 0.46f * height);
+        float battHalf = 27f * dpi;
+        float anchorX = MathUtil.Clamp(bodyCenterX, visLeft + battHalf, MathF.Max(visLeft + battHalf, visRight - battHalf));
 
         if (showBattery)
         {
             float pulse = u.Remaining < 0.22f ? (0.5f + (0.5f * MathF.Sin((float)_time.Total * 6f))) : 0f;
-            _hud.DrawBattery(canvas2D, head, dpi, u.Remaining, _renewedFlash > 0f, pulse);
+            _hud.DrawBattery(canvas2D, new SKPoint(anchorX, stackY), dpi, u.Remaining, _renewedFlash > 0f, pulse);
+            stackY -= (22f * dpi) + (10f * dpi); // lift the bubble clear above the battery
         }
 
         if (bubbleActive)
         {
-            // The bubble (drawn screen-upright, growing UPWARD from its tail) must sit
-            // above the body IN SCREEN SPACE regardless of orientation — otherwise, when
-            // the crab clings sideways or upside-down, the up-vector anchor lands beside/
-            // under the body and the bubble overlaps it. So anchor the tail at the body's
-            // topmost screen point: the higher of the feet and the rotated head, minus a
-            // clearance roughly equal to the body's on-screen half-extent.
-            float clearance = (height * 0.6f) + (15f * dpi);
-            float topY = MathF.Min(feet.Y, head.Y) - clearance;
-            float anchorX = MathUtil.Clamp((feet.X + head.X) * 0.5f, 0f, canvasSize);
-            var tail = new SKPoint(anchorX, topY);
-            _hud.DrawBubble(canvas2D, tail, dpi, _bubble, BubbleAlpha(), canvasSize);
+            _hud.DrawBubble(canvas2D, new SKPoint(anchorX, stackY), dpi, _bubble, BubbleAlpha(), visLeft, visRight);
         }
     }
 
@@ -504,6 +609,7 @@ public sealed class MascotEngine
     private void ReleaseThrow(Vector2 releaseVelocity)
     {
         PhysicsSystem.Throw(_mascot, releaseVelocity);
+        S.Stats.ThrowCount++; // "ya me lanzaste N veces"
         if (releaseVelocity.Length > 600f)
         {
             _particles.EmitDust(new Vector2(_mascot.Position.X, _world.GroundY));
@@ -691,12 +797,13 @@ public sealed class MascotEngine
         ShowBubble(AbuseLines[line], 2.6f);
         _emotion.Nudge(_rng.Chance(0.5f) ? Mood.Sad : Mood.Scared, 0.8f, 2f);
 
-        // Sometimes it sulks: plants itself and refuses to be steered for a beat.
-        if (_rng.Chance(0.45f))
+        // Sometimes it sulks: plants itself, crosses its little arms in a puchero and
+        // flatly refuses to be steered for a beat.
+        if (_rng.Chance(0.5f))
         {
-            _refuseTimer = _rng.Range(1.4f, 2.4f);
+            _refuseTimer = _rng.Range(1.6f, 2.8f);
             _mascot.Velocity = Vector2.Zero;
-            _mascot.Animation = AnimationState.Sad;
+            _mascot.Animation = AnimationState.Pout;
         }
     }
 
@@ -704,6 +811,28 @@ public sealed class MascotEngine
     {
         _pendingClick = false; // a double-click is a pet, never an open
         Pet();
+
+        // Tickling: several quick double-clicks in a row dissolve Claw'd into giggles.
+        if (_time.Total - _lastTickleTime < 2.6)
+        {
+            _tickleCount++;
+        }
+        else
+        {
+            _tickleCount = 1;
+        }
+
+        _lastTickleTime = _time.Total;
+
+        if (_tickleCount >= 3 && !_dragging && _mascot.OnGround)
+        {
+            _tickleCount = 0;
+            Trigger("laugh");
+            ShowBubble(_rng.Chance(0.5f) ? "¡Jaja, basta, me hace cosquillas!" : "¡Jiji! ¿Otra vez?", 2.4f);
+            _particles.EmitHearts(HeadWorld());
+            _particles.EmitSparkles(HeadWorld(), 4);
+            _emotion.Nudge(Mood.Playful, 1f, 2.5f);
+        }
     }
 
     private void OnRightUp(int x, int y)
@@ -959,20 +1088,8 @@ public sealed class MascotEngine
     }
 
     // ===================================================================
-    //  "World data" reactions — weather, dollar, crypto, fun facts
+    //  "World data" reactions — weather, holidays (dollar/crypto via chatter)
     // ===================================================================
-
-    private static readonly string[] FunFacts =
-    {
-        "¿Sabías? Los pulpos tienen tres corazones.",
-        "Un día en Venus dura más que su año.",
-        "La miel nunca se echa a perder.",
-        "Los flamencos son rosados por lo que comen.",
-        "El 80% del cerebro es agua.",
-        "Las nutrias se toman de la mano al dormir.",
-        "Un rayo es más caliente que la superficie del Sol.",
-        "Los gatos no sienten el sabor dulce.",
-    };
 
     private void UpdateWorldDataReactions(float dt)
     {
@@ -1012,17 +1129,136 @@ public sealed class MascotEngine
                 ReactToWeather(w);
             }
         }
+    }
 
-        // --- Fun data bubbles: rotate facts / dollar / crypto / greeting ------
-        _factCooldown -= dt;
-        if (_factCooldown <= 0f)
+    // ===================================================================
+    //  Ambient chatter — the heart of Claw'd's "always alive" feeling
+    // ===================================================================
+
+    /// <summary>
+    /// The always-on personality voice. Independent of WorldData and the battery, it
+    /// drips a fresh line into the speech bubble every so often: a fun fact, an absurd
+    /// thought, a self-aware quip, a comment about the time of day, a memory of your time
+    /// together, or — when you've been away — a gentle "¿seguís ahí?". Never talks over
+    /// another bubble, so the battery/weather lines still get their turn.
+    /// </summary>
+    private void UpdateChatter(float dt)
+    {
+        _chatterCooldown -= dt;
+        if (_chatterCooldown > 0f)
         {
-            _factCooldown = _rng.Range(35f, 55f); // a fresh line roughly every ~45s
-            if (_bubbleElapsed >= _bubbleRemaining) // don't talk over another bubble
+            return;
+        }
+
+        _chatterCooldown = _rng.Range(EngineConstants.ChatterMinGap, EngineConstants.ChatterMaxGap);
+
+        // Don't interrupt an active bubble or chatter while being handled / in photo mode.
+        if (_bubbleElapsed < _bubbleRemaining || _photoMode || _dragging)
+        {
+            return;
+        }
+
+        ShowBubble(NextChatterLine(), 5f);
+    }
+
+    /// <summary>Chooses the next ambient line, weighted and contextual.</summary>
+    private string NextChatterLine()
+    {
+        // A warm "welcome back" the first time we chatter after a long absence.
+        if (_returnGreeted)
+        {
+            _returnGreeted = false;
+            return _returnDays >= 2
+                ? $"¡Cuánto tiempo! Hace {_returnDays} días que no nos vemos."
+                : _phrasebook.Welcome();
+        }
+
+        // You've wandered off — notice it (but not every single time).
+        if (_idleSeconds > EngineConstants.IdleChatterSeconds && _rng.Chance(0.6f))
+        {
+            return _phrasebook.Observation();
+        }
+
+        // Occasionally reach for a memory of the time we've spent together.
+        if (_rng.Chance(0.22f) && MemoryLine() is { } memory)
+        {
+            return memory;
+        }
+
+        // World-data lines (dollar/crypto/greeting) when that's enabled and available.
+        if (S.WorldData && _rng.Chance(0.28f) && DataLine(_worldData.Current) is { } data)
+        {
+            return data;
+        }
+
+        // The everyday mix: fun facts, absurdities, self-aware quips, time-of-day lines.
+        return _rng.Range(0, 100) switch
+        {
+            < 38 => _phrasebook.FunFact(),
+            < 58 => _phrasebook.Absurd(),
+            < 76 => _phrasebook.SelfReferential(_skins.Current.Palette.Style),
+            _ => _phrasebook.TimeComment(DateTime.Now.Hour),
+        };
+    }
+
+    /// <summary>
+    /// A line referencing Claw'd's persisted stats — the "memory" that makes him feel like
+    /// he remembers your history. Returns null when nothing notable has happened yet.
+    /// </summary>
+    private string? MemoryLine()
+    {
+        Stats s = S.Stats;
+        var pool = new List<string>(8);
+
+        if (s.ThrowCount >= 3)
+        {
+            pool.Add($"Ya me lanzaste {s.ThrowCount} veces.");
+        }
+
+        if (s.PetCount >= 3)
+        {
+            pool.Add($"Me acariciaste {s.PetCount} veces. Gracias :)");
+        }
+
+        if (s.BackflipCount >= 1)
+        {
+            pool.Add($"Llevo {s.BackflipCount} backflips. Soy una estrella.");
+        }
+
+        if (s.ClaudeOpenCount >= 2)
+        {
+            pool.Add($"Abrimos Claude {s.ClaudeOpenCount} veces juntos.");
+        }
+
+        if (s.GreetCount >= 5)
+        {
+            pool.Add($"Te saludé {s.GreetCount} veces. Hola de nuevo.");
+        }
+
+        // DistanceWalked is in physical px; turn it into a playful "metros" (~3800 px/m-ish
+        // at typical DPI — it's a fun number, not a survey).
+        long metres = s.DistanceWalked / 1600;
+        if (metres >= 5)
+        {
+            pool.Add($"Ya caminé como {metres} metros por tu escritorio.");
+        }
+
+        if (s.MaxThrowHeightPx >= 400)
+        {
+            pool.Add("Mi récord de altura sigue en pie. Fue épico.");
+        }
+
+        // "It's been a while since you petted me."
+        if (s.LastPettedUtc > DateTimeOffset.MinValue)
+        {
+            int hoursSincePet = (int)(DateTimeOffset.UtcNow - s.LastPettedUtc).TotalHours;
+            if (hoursSincePet >= 24)
             {
-                ShowBubble(NextDataLine(w), 5f);
+                pool.Add("Hace rato que no me mimás, eh.");
             }
         }
+
+        return pool.Count == 0 ? null : pool[_rng.Range(0, pool.Count)];
     }
 
     private void ReactToWeather(WorldDataSnapshot w)
@@ -1063,27 +1299,30 @@ public sealed class MascotEngine
         }
     }
 
-    private string NextDataLine(WorldDataSnapshot w)
+    /// <summary>
+    /// A real-world-data line (greeting / blue dollar / BTC), rotated so it varies. Returns
+    /// null when no such data is available right now (the chatter mix then picks something
+    /// else). Fun facts no longer live here — those are in the <see cref="Phrasebook"/>.
+    /// </summary>
+    private string? DataLine(WorldDataSnapshot w)
     {
         // Rotate through the available data sources so it's varied.
-        for (int attempt = 0; attempt < 4; attempt++)
+        for (int attempt = 0; attempt < 3; attempt++)
         {
-            switch (_factIndex++ % 4)
+            switch (_factIndex++ % 3)
             {
                 case 0:
                     return GreetingLine();
                 case 1:
                     if (w.HasDollar) return $"Dólar blue: ${w.DollarBlue}";
                     break;
-                case 2:
+                default:
                     if (w.HasCrypto) return $"Bitcoin: U$D {w.BtcUsd:N0}";
                     break;
-                default:
-                    return Pick(FunFacts);
             }
         }
 
-        return Pick(FunFacts);
+        return null;
     }
 
     private string GreetingLine()
@@ -1126,6 +1365,7 @@ public sealed class MascotEngine
         _particles.EmitHearts(HeadWorld());
         _audio.Play("pet");
         S.Stats.PetCount++;
+        S.Stats.LastPettedUtc = DateTimeOffset.UtcNow;
         S.Happiness = _emotion.Happiness;
 
         if (_emotion.RareContentUnlocked && _rng.Chance(0.25f))
@@ -1171,12 +1411,23 @@ public sealed class MascotEngine
     //  Context menu
     // ===================================================================
 
+    /// <summary>Sentinel "behaviour id" for the Portal clone event in the Play Animation menu —
+    /// it's an engine event, not a catalogue behaviour, so HandleMenu routes it specially.</summary>
+    private const string PortalAnimId = "__portal__";
+
     private MenuState BuildMenuState()
     {
         _skins.Discover(_settings.SettingsDirectory); // refresh so newly-dropped skins appear
         var skins = _skins.Skins
             .Select(s => new SkinMenuItem(s.Id, s.Name, s.Id == _skins.Current.Id))
             .ToList();
+
+        // Every catalogue behaviour, grouped by category, so the menu shows (and can review)
+        // the full animation repertoire — including reaction-only ones — plus the Portal event.
+        var animations = _catalog.All
+            .Select(b => new AnimationMenuItem(b.Id, b.DisplayName, b.Category.ToString()))
+            .ToList();
+        animations.Add(new AnimationMenuItem(PortalAnimId, "Portal Clone Event", "Special"));
 
         return new MenuState
         {
@@ -1190,6 +1441,7 @@ public sealed class MascotEngine
             Volume = S.Volume,
             BehaviorFrequency = S.BehaviorFrequency,
             Skins = skins,
+            Animations = animations,
         };
     }
 
@@ -1259,6 +1511,9 @@ public sealed class MascotEngine
                 break;
             case MenuCommand.PhotoMode:
                 TogglePhotoMode();
+                break;
+            case MenuCommand.PlayAnimation when sel.SkinId is not null:
+                PlayAnimationFromMenu(sel.SkinId);
                 break;
             case MenuCommand.Achievements:
                 ShowAchievements();
@@ -1363,6 +1618,20 @@ public sealed class MascotEngine
             S.Stats.JumpCount++;
         }
 
+        if (def.Id == "backflip")
+        {
+            S.Stats.BackflipCount++;
+        }
+
+        if (def.Id is "greet" or "wave")
+        {
+            S.Stats.GreetCount++;
+        }
+
+        // Hand the animator the imaginary prop this behaviour shows off (or clear it for
+        // every non-prop behaviour, so a held prop fades away as Claw'd moves on).
+        _animator.SetHeldProp(def.HeldProp ?? HeldPropKind.None);
+
         if (def.EnterParticle is ParticleKind kind)
         {
             EmitBehaviorParticle(kind);
@@ -1395,6 +1664,7 @@ public sealed class MascotEngine
             case ParticleKind.Star: _particles.EmitStars(head); break;
             case ParticleKind.Magic: _particles.EmitMagic(head); break;
             case ParticleKind.Note: _particles.EmitSparkles(head, 4); break;
+            case ParticleKind.Dust: _particles.EmitDust(new Vector2(_mascot.Position.X, _world.GroundY)); break;
             default: _particles.EmitSparkles(head); break;
         }
     }
@@ -1426,6 +1696,16 @@ public sealed class MascotEngine
         if (_mascot.OnGround)
         {
             S.Stats.DistanceWalked += (long)(MathF.Abs(_mascot.Velocity.X) * dt);
+        }
+        else if (!_mascot.Climbing)
+        {
+            // Airborne (a jump or — usually — a fling): track the altitude record. Climbing
+            // is excluded so scaling a wall doesn't trivially set a sky-high "record".
+            long height = (long)(_world.GroundY - _mascot.Position.Y);
+            if (height > S.Stats.MaxThrowHeightPx)
+            {
+                S.Stats.MaxThrowHeightPx = height;
+            }
         }
 
         S.Happiness = _emotion.Happiness;
@@ -1484,6 +1764,620 @@ public sealed class MascotEngine
         _behavior.Force(id, _mascot, _world, _emotion, r, _cursor.Position, S.BehaviorFrequency);
     }
 
+    /// <summary>
+    /// Force-plays the animation picked from the "Play Animation" right-click submenu, so the
+    /// user can review (and we can tune) any single animation on demand. The special Portal
+    /// sentinel kicks off the clone event instead. The mascot is brought back to a clean,
+    /// upright, grounded state first so the chosen animation reads correctly wherever it stands.
+    /// </summary>
+    private void PlayAnimationFromMenu(string id)
+    {
+        if (id == PortalAnimId)
+        {
+            if (_clonePhase == ClonePhase.Idle)
+            {
+                StartCloneEvent(); // play it now; EndCloneEvent restores the normal rare cadence
+            }
+
+            return;
+        }
+
+        // Drop any climb/drag so the reviewed animation plays from a normal floor stance.
+        if (_dragging)
+        {
+            OnLeftUp(0, 0);
+        }
+
+        _mascot.BeingDragged = false;
+        _mascot.Surface = Surface.Floor;
+        _mascot.RenderAngleOverride = null;
+        _mascot.BodyAngle = 0f;
+        _mascot.AngularVelocity = 0f;
+
+        Trigger(id);
+    }
+
+    /// <summary>
+    /// Little cursor games. Circling the mascot round and round makes it dizzy from
+    /// watching; a fast flick passing right by ruffles/startles it (both feed the existing
+    /// dizziness meter, so the dizzy reaction + recovery are free). Resting the cursor still
+    /// right beside it for a beat makes it offer a paw (a friendly wave + hearts).
+    /// </summary>
+    private void UpdateCursorMicro(float dt, float dpi)
+    {
+        _ruffleCd = MathF.Max(0f, _ruffleCd - dt);
+        _pawCd = MathF.Max(0f, _pawCd - dt);
+
+        Vector2 head = HeadWorld();
+        Vector2 to = _cursor.Position - head;
+        float dist = to.Length;
+        float orbitRadius = EngineConstants.CursorNoticeRadius * dpi;
+
+        // --- Cursor resting still right beside it → it offers a paw (wave + hearts). ---
+        UpdateGivePaw(dt, dpi, dist);
+
+        // --- Cursor circling it → it gets woozy following the loops with its eyes. ---
+        bool orbiting = dist > 20f * dpi && dist < orbitRadius && _cursor.Speed > 200f * dpi;
+        if (orbiting)
+        {
+            float angle = MathF.Atan2(to.Y, to.X);
+            if (_orbitArmed)
+            {
+                float delta = MathUtil.WrapPi(angle - _lastCursorAngle);
+                if (MathF.Abs(delta) < 1.2f) // consistent sweep, not a jump/reversal
+                {
+                    _orbitAccum += delta;
+                }
+            }
+
+            _lastCursorAngle = angle;
+            _orbitArmed = true;
+
+            // About two full loops in one direction and it's properly giddy.
+            if (MathF.Abs(_orbitAccum) > MathUtil.Tau * 2f)
+            {
+                _mascot.Dizziness = MathUtil.Clamp01(_mascot.Dizziness + (dt * 0.5f));
+            }
+        }
+        else
+        {
+            _orbitArmed = false;
+            _orbitAccum = MathUtil.Damp(_orbitAccum, 0f, 1.5f, dt); // forget once it stops
+        }
+
+        // --- A fast flick passing right by → a startled little ruffle. ---
+        if (_ruffleCd <= 0f && dist < 95f * dpi
+            && _cursor.Speed > EngineConstants.SurpriseCursorSpeed * 0.55f * dpi)
+        {
+            _ruffleCd = 2.5f;
+            Trigger("surprised");
+            _particles.EmitDust(head, 4);
+            _mascot.Dizziness = MathUtil.Clamp01(_mascot.Dizziness + 0.12f);
+        }
+    }
+
+    /// <summary>
+    /// "Give a paw": hold the cursor still just beside Claw'd for about a second and it
+    /// notices, offers a paw and waves happily (with a couple of hearts). Like coaxing a
+    /// real pet — calm and close, not fast. Resets the moment the cursor moves away or fast.
+    /// </summary>
+    private void UpdateGivePaw(float dt, float dpi, float dist)
+    {
+        bool beside = dist > 30f * dpi && dist < EngineConstants.GivePawRadius * dpi;
+        bool calm = _cursor.Speed < EngineConstants.GivePawMaxCursorSpeed * dpi;
+        bool available = _mascot.OnGround && !_dragging && !_mascot.Climbing && !_keyboard.IsTyping
+            && (_behavior.Current.Id is "idle" or "look-around" or "stare" or "sit" or "watch-cursor");
+
+        if (_pawCd <= 0f && beside && calm && available)
+        {
+            _pawHover += dt;
+            if (_pawHover >= EngineConstants.GivePawHoldSeconds)
+            {
+                _pawHover = 0f;
+                _pawCd = EngineConstants.GivePawCooldown;
+                Trigger("wave"); // the wave pose lifts an outer leg toward the cursor like a paw
+                _emotion.Nudge(Mood.Happy, 0.8f, 2.5f);
+                _particles.EmitHearts(HeadWorld(), 2);
+            }
+        }
+        else
+        {
+            _pawHover = MathF.Max(0f, _pawHover - (dt * 2f)); // decays quickly once it breaks
+        }
+    }
+
+    // ---- Behaviour "stories" (sequenced chains) -------------------------
+
+    /// <summary>
+    /// Little scripted sequences that play out one behaviour after another, so Claw'd
+    /// occasionally does something that reads as a tiny narrative instead of an isolated
+    /// pose. Every id is a real catalogue behaviour; the controller advances to the next
+    /// step when each one finishes, and any interaction cancels the rest.
+    /// </summary>
+    private static readonly string[][] Chains =
+    {
+        new[] { "walk", "find-flower", "laugh", "wave", "walk" },        // wander, find a flower, delight, leave
+        new[] { "walk", "slip", "embarrassed", "dust-off" },            // strut, slip, fluster, tidy up
+        new[] { "look-around", "count-legs", "confused", "somersault", "celebrate" }, // miscount legs, then triumph anyway
+        new[] { "walk", "inspect-icons", "think", "look-under", "look-around" },       // investigate the desktop
+        new[] { "drowse", "snore", "wake", "stretch", "yawn", "walk" }, // a whole little nap
+        new[] { "wiggle", "spin", "somersault", "wave" },              // an impromptu dance routine
+        new[] { "walk", "coffee", "stretch", "wave" },                 // coffee break
+        new[] { "look-around", "sneeze", "dust-off", "balance" },      // a-tishoo, recover, steady on
+    };
+
+    /// <summary>
+    /// Rare "special moments" — the once-in-a-blue-moon surprises that reward leaving Claw'd
+    /// running for hours. Each is a flashy chain plus a celebratory bubble + particles. Built
+    /// entirely from existing behaviours, so there's nothing new to break.
+    /// </summary>
+    private static readonly (string Bubble, string[] Story)[] RareEvents =
+    {
+        ("¡Hora de fiesta!",          new[] { "celebrate", "dance", "spin", "dance", "wave" }),
+        ("¡Encontré un tesoro!",      new[] { "look-under", "find-flower", "celebrate", "proud" }),
+        ("¡Parkour!",                 new[] { "run", "backflip", "somersault", "wave" }),
+        ("¿Viste? ¡Breakdance!",      new[] { "wiggle", "spin", "somersault", "dance" }),
+        ("¡Que comience el show!",    new[] { "wave", "balance", "somersault", "celebrate" }),
+    };
+
+    private void MaybeRareEvent(float dt)
+    {
+        _rareCooldown -= dt;
+        if (_rareCooldown > 0f)
+        {
+            return;
+        }
+
+        _rareCooldown = _rng.Range(EngineConstants.RareMinGap, EngineConstants.RareMaxGap);
+
+        // Only from a calm, grounded moment, and not while a story is already playing.
+        if (_behavior.ChainActive || _mascot.Climbing || !_mascot.OnGround || _keyboard.IsTyping)
+        {
+            // Not a good moment — try again soon rather than waiting the full interval.
+            _rareCooldown = _rng.Range(45f, 90f);
+            return;
+        }
+
+        (string bubble, string[] story) = RareEvents[_rng.Range(0, RareEvents.Length)];
+        ShowBubble(bubble, 4.5f);
+        Vector2 head = HeadWorld();
+        _particles.EmitConfetti(head);
+        _particles.EmitStars(head, 12);
+        _particles.EmitMagic(head, 12);
+        _emotion.Nudge(Mood.Excited, 1f, 3f);
+        _behavior.RunChain(story, _mascot, _world, _emotion, _routine.Evaluate(), _cursor.Position, S.BehaviorFrequency);
+    }
+
+    /// <summary>
+    /// Every so often Claw'd strolls over to a REAL desktop element and interacts with it —
+    /// right now the actual Windows taskbar clock: it walks to the clock's true screen X (via
+    /// the read-only <see cref="DesktopProbe"/>), looks at it and tells you the time. If the
+    /// clock can't be located, nothing happens (graceful).
+    /// </summary>
+    private void MaybeDesktopInteraction(float dt)
+    {
+        _desktopCooldown -= dt;
+        if (_desktopCooldown > 0f)
+        {
+            return;
+        }
+
+        _desktopCooldown = _rng.Range(EngineConstants.DesktopMinGap, EngineConstants.DesktopMaxGap);
+
+        // Only from a calm, grounded, ordinary moment.
+        if (_behavior.ChainActive || _mascot.Climbing || !_mascot.OnGround || _keyboard.IsTyping
+            || _behavior.Current.Id is not ("idle" or "walk" or "look-around" or "stare" or "sit"))
+        {
+            return;
+        }
+
+        // Half the time, stroll to a screen corner and peek around it instead of the clock.
+        if (_rng.Chance(0.5f))
+        {
+            PeekAtCorner();
+            return;
+        }
+
+        if (!_desktop.TryGetClockX(out float clockX))
+        {
+            PeekAtCorner(); // no real clock found — peek a corner instead so the beat isn't wasted
+            return;
+        }
+
+        _behavior.SetApproachX(clockX);
+        Trigger("check-clock");
+        ShowBubble($"Las {DateTime.Now:HH:mm}, dice el reloj.", 6f);
+        _emotion.Nudge(Mood.Curious, 0.5f, 2f);
+    }
+
+    private static readonly string[] PeekLines =
+    {
+        "¿Qué habrá del otro lado?",
+        "Me asomo un ratito...",
+        "Espiando por el borde.",
+        "Shh, estoy explorando.",
+        "Desde acá se ve todo distinto.",
+    };
+
+    /// <summary>Walks to the nearest screen-edge corner and peeks around it. No Win32 needed —
+    /// it just heads for the edge of the work area, so it's safe on any Windows build.</summary>
+    private void PeekAtCorner()
+    {
+        // Pick whichever side wall is closer so it doesn't trek across the whole screen.
+        float half = _mascot.HalfWidthPx(_window.DpiScale);
+        bool left = _mascot.Position.X < (_world.LeftWall + _world.RightWall) * 0.5f;
+        float cornerX = left ? _world.LeftWall + half : _world.RightWall - half;
+
+        _behavior.SetApproachX(cornerX);
+        Trigger("peek-corner");
+        if (_rng.Chance(0.6f))
+        {
+            ShowBubble(PeekLines[_rng.Range(0, PeekLines.Length)], 4f);
+        }
+
+        _emotion.Nudge(Mood.Curious, 0.5f, 2f);
+    }
+
+    private static readonly string[] WindowSwitchLines =
+    {
+        "¿Cambiaste de ventana?",
+        "Ah, ¿ahora vamos a otra cosa?",
+        "Te seguí el cambio, eh.",
+        "Nueva ventana, nueva aventura.",
+        "¿Y esa ventana de dónde salió?",
+        "Vi que abriste algo.",
+    };
+
+    private static readonly string[] VolumeUpLines =
+    {
+        "¡Uy, subiste el volumen!",
+        "¡Más fuerte, me gusta!",
+        "Eso suena bien alto.",
+        "¡A todo volumen!",
+    };
+
+    private static readonly string[] VolumeDownLines =
+    {
+        "Shh, bajamos el volumen.",
+        "Más bajito, dale.",
+        "¿Buscando silencio?",
+        "Modo tranquilo activado.",
+    };
+
+    /// <summary>
+    /// Reactions to the REAL desktop that don't need to walk anywhere: noticing when you switch
+    /// to a different app window, and when you turn the system volume up/down (or mute). Both are
+    /// read-only and best-effort — if a probe ever fails it just does nothing. Works identically
+    /// on Windows 10 and 11.
+    /// </summary>
+    private void UpdateDesktopReactions(float dt)
+    {
+        _windowReactCd = MathF.Max(0f, _windowReactCd - dt);
+        _volumeReactCd = MathF.Max(0f, _volumeReactCd - dt);
+
+        // --- Active-window switch → a brief "huh?" glance. ---
+        IntPtr fg = NativeMethods.GetForegroundWindow();
+        if (fg != IntPtr.Zero && fg != _lastForeground)
+        {
+            _lastForeground = fg;
+            if (!_foregroundSeeded)
+            {
+                _foregroundSeeded = true; // first sighting isn't a "change"
+            }
+            else if (_windowReactCd <= 0f && IsCalmGrounded())
+            {
+                _windowReactCd = EngineConstants.WindowReactCooldown;
+                Trigger("look-around");
+                if (_rng.Chance(0.5f))
+                {
+                    ShowBubble(WindowSwitchLines[_rng.Range(0, WindowSwitchLines.Length)], 3f);
+                }
+
+                _emotion.Nudge(Mood.Curious, 0.4f, 1.5f);
+            }
+        }
+
+        // --- System volume change → tap ears / cheer (polled, not every frame). ---
+        _volumePollAcc += dt;
+        if (_volumePollAcc < EngineConstants.VolumePollSeconds)
+        {
+            return;
+        }
+
+        _volumePollAcc = 0f;
+        if (!_audioProbe.TryGetMasterVolume(out float vol, out bool muted))
+        {
+            return; // couldn't read the endpoint — skip silently
+        }
+
+        float effective = muted ? 0f : vol;
+        if (_lastVolume < 0f)
+        {
+            _lastVolume = effective; // seed; never react on the first reading
+            return;
+        }
+
+        float delta = effective - _lastVolume;
+        _lastVolume = effective;
+
+        if (_volumeReactCd <= 0f && MathF.Abs(delta) > EngineConstants.VolumeReactDelta && IsCalmGrounded())
+        {
+            _volumeReactCd = EngineConstants.VolumeReactCooldown;
+            if (delta > 0f)
+            {
+                Trigger("wiggle"); // a happy little bounce when it gets louder
+                _emotion.Nudge(Mood.Happy, 0.5f, 1.5f);
+                if (_rng.Chance(0.6f)) { ShowBubble(VolumeUpLines[_rng.Range(0, VolumeUpLines.Length)], 3f); }
+            }
+            else
+            {
+                Trigger("surprised"); // covers/ducks a touch when it drops
+                _emotion.Nudge(Mood.Surprised, 0.4f, 1.2f);
+                if (_rng.Chance(0.6f)) { ShowBubble(VolumeDownLines[_rng.Range(0, VolumeDownLines.Length)], 3f); }
+            }
+        }
+    }
+
+    /// <summary>True when Claw'd is in an ordinary, settled state (safe to interrupt with a
+    /// small reaction): grounded, not climbing/dragging/typing, doing nothing important.</summary>
+    private bool IsCalmGrounded() =>
+        _mascot.OnGround && !_mascot.Climbing && !_dragging && !_photoMode && !_keyboard.IsTyping
+        && !_behavior.ChainActive
+        && _behavior.Current.Id is "idle" or "walk" or "look-around" or "stare" or "sit" or "watch-cursor";
+
+    /// <summary>Occasionally launches a behaviour story from a calm, grounded moment.</summary>
+    private void MaybeStartChain(float dt)
+    {
+        _chainCooldown -= dt;
+        if (_chainCooldown > 0f)
+        {
+            return;
+        }
+
+        _chainCooldown = _rng.Range(EngineConstants.ChainMinGap, EngineConstants.ChainMaxGap);
+
+        // Only begin a story from an ordinary, settled state — never over a running story,
+        // mid-climb, airborne, or while the user is typing (typing owns Claw'd's attention).
+        if (_behavior.ChainActive || _mascot.Climbing || !_mascot.OnGround || _keyboard.IsTyping)
+        {
+            return;
+        }
+
+        if (_behavior.Current.Id is not ("idle" or "walk" or "look-around" or "stare" or "sit" or "admire-view"))
+        {
+            return;
+        }
+
+        string[] story = Chains[_rng.Range(0, Chains.Length)];
+        _behavior.RunChain(story, _mascot, _world, _emotion, _routine.Evaluate(), _cursor.Position, S.BehaviorFrequency);
+    }
+
+    // ===================================================================
+    //  Portal clone event — a second Claw'd drops out of a Portal-style
+    //  portal anywhere on screen (with the real physics), looks around,
+    //  then steps back into a portal and vanishes.
+    // ===================================================================
+
+    /// <summary>Occasionally kicks off the portal clone event from a calm, grounded moment.</summary>
+    private void MaybeStartCloneEvent(float dt)
+    {
+        if (_clonePhase != ClonePhase.Idle)
+        {
+            return; // one at a time
+        }
+
+        _cloneCooldown -= dt;
+        if (_cloneCooldown > 0f)
+        {
+            return;
+        }
+
+        // Not a good moment? Try again before long rather than waiting the full interval.
+        if (_mascot.Climbing || _dragging || _photoMode || _keyboard.IsTyping)
+        {
+            _cloneCooldown = _rng.Range(20f, 45f);
+            return;
+        }
+
+        StartCloneEvent();
+    }
+
+    private void StartCloneEvent()
+    {
+        // The portal can open ANYWHERE on screen, high enough that the clone falls in with
+        // gravity and bounces on landing.
+        _portalX = _rng.Range(_world.LeftWall + 140f, _world.RightWall - 140f);
+        float top = _world.CeilingY + 130f;
+        float low = _world.GroundY - 360f;
+        _portalY = low > top ? _rng.Range(top, low) : top;
+        _portalScale = 0f;
+        _portalAlpha = 0f;
+
+        // The clone spawns at the portal, identical to Claw'd, held until it drops out.
+        _cloneMascot.Position = new Vector2(_portalX, _portalY);
+        _cloneMascot.Velocity = Vector2.Zero;
+        _cloneMascot.OnGround = false;
+        _cloneMascot.Surface = Surface.Floor;
+        _cloneMascot.BodyAngle = 0f;
+        _cloneMascot.AngularVelocity = 0f;
+        _cloneMascot.Scale = _mascot.Scale;
+        _cloneMascot.Facing = _rng.Chance(0.5f) ? Facing.Left : Facing.Right;
+        _cloneMascot.Animation = AnimationState.Fall;
+        _cloneAlpha = 0f;
+        _cloneReacted = false;
+
+        _clonePhase = ClonePhase.Opening;
+        _cloneTimer = 0f;
+        _cloneWindow.Show();
+    }
+
+    private void EndCloneEvent()
+    {
+        _clonePhase = ClonePhase.Idle;
+        _cloneWindow.Hide();
+        _cloneCooldown = _rng.Range(EngineConstants.RareMinGap, EngineConstants.RareMaxGap); // rare from now on
+    }
+
+    private void UpdateCloneEvent(float dt)
+    {
+        if (_clonePhase == ClonePhase.Idle)
+        {
+            return;
+        }
+
+        _cloneTimer += dt;
+        float dpi = _window.DpiScale;
+
+        switch (_clonePhase)
+        {
+            case ClonePhase.Opening:
+            {
+                float t = MathUtil.Clamp01(_cloneTimer / 0.55f);
+                _portalScale = Easing.OutCubic(t);
+                _portalAlpha = t;
+                if (_cloneTimer >= 0.55f)
+                {
+                    _clonePhase = ClonePhase.Drop;
+                    _cloneTimer = 0f;
+                    _cloneAlpha = 1f;
+                    // Pop out: a little sideways nudge; the existing gravity does the rest.
+                    _cloneMascot.Velocity = new Vector2((float)_cloneMascot.Facing * _rng.Range(40f, 110f), 50f);
+                    MaybeReactToClone();
+                }
+
+                break;
+            }
+
+            case ClonePhase.Drop:
+            {
+                _clonePhysics.Step(_cloneMascot, _world, dt, false); // real gravity + bounce + walls
+                _cloneMascot.Animation = _cloneMascot.OnGround
+                    ? AnimationState.Land
+                    : (_cloneMascot.Velocity.Y < 0f ? AnimationState.Jump : AnimationState.Fall);
+
+                // The entry portal winks shut behind it.
+                float close = MathUtil.Clamp01((_cloneTimer - 0.2f) / 0.45f);
+                _portalScale = 1f - close;
+                _portalAlpha = 1f - close;
+
+                if ((_cloneMascot.OnGround && _cloneTimer > 0.85f) || _cloneTimer > 4.5f)
+                {
+                    _clonePhase = ClonePhase.Linger;
+                    _cloneTimer = 0f;
+                }
+
+                break;
+            }
+
+            case ClonePhase.Linger:
+            {
+                _clonePhysics.Step(_cloneMascot, _world, dt, false); // keep settling on the ground
+                _cloneMascot.Facing = _mascot.Position.X < _cloneMascot.Position.X ? Facing.Left : Facing.Right;
+                _cloneMascot.Animation = _cloneTimer < 1f ? AnimationState.LookAround : AnimationState.Wave;
+                if (_cloneTimer >= 2f)
+                {
+                    // Open the exit portal right where the clone is standing.
+                    _clonePhase = ClonePhase.ExitOpen;
+                    _cloneTimer = 0f;
+                    _portalX = _cloneMascot.Position.X;
+                    _portalY = _cloneMascot.Position.Y - (_cloneMascot.HeightPx(dpi) * 0.5f);
+                    _portalScale = 0f;
+                    _portalAlpha = 0f;
+                }
+
+                break;
+            }
+
+            case ClonePhase.ExitOpen:
+            {
+                float t = MathUtil.Clamp01(_cloneTimer / 0.45f);
+                _portalScale = Easing.OutCubic(t);
+                _portalAlpha = t;
+                _cloneMascot.Animation = AnimationState.Idle;
+                if (_cloneTimer >= 0.45f)
+                {
+                    _clonePhase = ClonePhase.ExitClose;
+                    _cloneTimer = 0f;
+                }
+
+                break;
+            }
+
+            case ClonePhase.ExitClose:
+            {
+                // The clone steps into the portal (fades + sinks), then the portal closes.
+                _cloneAlpha = 1f - MathUtil.Clamp01(_cloneTimer / 0.55f);
+                _cloneMascot.Animation = AnimationState.Idle;
+                if (_cloneTimer >= 0.45f)
+                {
+                    float c = MathUtil.Clamp01((_cloneTimer - 0.45f) / 0.5f);
+                    _portalScale = 1f - c;
+                    _portalAlpha = 1f - c;
+                }
+
+                if (_cloneTimer >= 1f)
+                {
+                    EndCloneEvent();
+                }
+
+                break;
+            }
+        }
+
+        // Drive the clone's pose; it keeps an eye on the real Claw'd.
+        float lookX = MathF.Sign(_mascot.Position.X - _cloneMascot.Position.X) * 0.4f;
+        _cloneMascot.AnimationSpeed = 1f;
+        _cloneAnimator.Update(_cloneMascot, _cloneEmotion, dt, lookX, 0f);
+    }
+
+    /// <summary>The real Claw'd does a double-take when its clone pops out nearby.</summary>
+    private void MaybeReactToClone()
+    {
+        if (_cloneReacted)
+        {
+            return;
+        }
+
+        _cloneReacted = true;
+        bool nearby = MathF.Abs(_cloneMascot.Position.X - _mascot.Position.X) < 600f;
+        if (nearby && _mascot.OnGround && !_dragging && !_photoMode)
+        {
+            Trigger("surprised");
+            ShowBubble(_rng.Chance(0.5f) ? "¿Y ese... soy yo?!" : "¡Se abrió un portal!", 4f);
+            _emotion.Nudge(Mood.Surprised, 1f, 2f);
+        }
+    }
+
+    /// <summary>Renders the portal + clone into the clone's own follow-the-clone overlay window.</summary>
+    private void RenderClone(float dpi)
+    {
+        int canvas = _cloneRenderer.Size;
+        float anchorX = canvas * 0.5f;
+        float anchorY = canvas * EngineConstants.CanvasFeetAnchor;
+        int winX = (int)MathF.Round(_cloneMascot.Position.X - anchorX);
+        int winY = (int)MathF.Round(_cloneMascot.Position.Y - anchorY);
+
+        float height = _cloneMascot.HeightPx(dpi);
+        float groundCanvasY = _world.GroundY - winY;
+        var feet = new SKPoint(_cloneMascot.Position.X - winX, _cloneMascot.Position.Y - winY);
+
+        _cloneRenderer.Render(_cloneWindow.Handle, winX, winY, 255, c =>
+        {
+            // Portal behind the clone.
+            _artist.DrawPortal(c, _portalX - winX, _portalY - winY, height, _portalScale, _portalAlpha, (float)_time.Total);
+
+            // The clone itself, faded in/out by _cloneAlpha (a layer so the whole body fades).
+            if (_cloneAlpha > 0.02f)
+            {
+                using var fade = new SKPaint { Color = new SKColor(255, 255, 255, (byte)(255 * MathUtil.Clamp01(_cloneAlpha))) };
+                c.SaveLayer(fade);
+                _artist.Draw(c, feet, groundCanvasY, height, _cloneMascot.Facing,
+                    _cloneMascot.SquashX, _cloneMascot.SquashY, _cloneAnimator.Current, _skins.Current.Palette, dpi);
+                c.Restore();
+            }
+        });
+    }
+
     private void RestorePosition()
     {
         if (float.IsNaN(S.PositionX) || float.IsNaN(S.PositionY))
@@ -1520,6 +2414,7 @@ public sealed class MascotEngine
         S.PositionY = _mascot.Position.Y;
         S.Scale = _mascot.Scale;
         S.Happiness = _emotion.Happiness;
+        S.Stats.LastSeenUtc = DateTimeOffset.UtcNow; // so next launch can greet us back
         S.CurrentSkin = _skins.Current.Id == "classic" ? string.Empty : _skins.Current.Id;
         _settings.Save();
     }

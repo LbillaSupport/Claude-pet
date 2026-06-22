@@ -141,4 +141,56 @@ public static class EngineConstants
 
     /// <summary>Distance (logical px) under which the mascot notices the cursor.</summary>
     public const float CursorNoticeRadius = 320f;
+
+    // ---- "Give a paw" mini-game -----------------------------------------
+
+    /// <summary>How close (logical px) the cursor must rest for the "give a paw" coax.</summary>
+    public const float GivePawRadius = 120f;
+
+    /// <summary>Cursor speed (px/s) under which it counts as "held still" beside the mascot.</summary>
+    public const float GivePawMaxCursorSpeed = 60f;
+
+    /// <summary>Seconds the cursor must rest still beside it before it offers a paw.</summary>
+    public const float GivePawHoldSeconds = 0.9f;
+
+    /// <summary>Debounce (s) so the paw offer doesn't repeat back-to-back.</summary>
+    public const float GivePawCooldown = 6f;
+
+    // ---- Real-desktop reactions (active window + volume) -----------------
+
+    /// <summary>Debounce (s) for the active-window-switch glance so app-flipping isn't spammy.</summary>
+    public const float WindowReactCooldown = 14f;
+
+    /// <summary>How often (s) we read the system master volume (a cheap COM call, but not per-frame).</summary>
+    public const float VolumePollSeconds = 0.4f;
+
+    /// <summary>Minimum master-volume change (0..1) that counts as "you changed it".</summary>
+    public const float VolumeReactDelta = 0.05f;
+
+    /// <summary>Debounce (s) so a volume slide doesn't fire a reaction on every step.</summary>
+    public const float VolumeReactCooldown = 4f;
+
+    // ---- Ambient chatter -------------------------------------------------
+
+    /// <summary>Cursor speed (px/s) below which the user counts as idle (no movement).</summary>
+    public const float IdleCursorSpeed = 6f;
+
+    /// <summary>Seconds of user inactivity before Claw'd starts wondering where you went.</summary>
+    public const float IdleChatterSeconds = 35f;
+
+    /// <summary>Shortest / longest gap (s) between ambient chatter bubbles.</summary>
+    public const float ChatterMinGap = 26f;
+    public const float ChatterMaxGap = 52f;
+
+    /// <summary>Shortest / longest gap (s) between spontaneous behaviour "stories".</summary>
+    public const float ChainMinGap = 75f;
+    public const float ChainMaxGap = 160f;
+
+    /// <summary>Shortest / longest gap (s) between rare "special moments" (~20–75 min).</summary>
+    public const float RareMinGap = 1200f;
+    public const float RareMaxGap = 4500f;
+
+    /// <summary>Shortest / longest gap (s) between real-desktop interactions (e.g. the clock).</summary>
+    public const float DesktopMinGap = 150f;
+    public const float DesktopMaxGap = 320f;
 }

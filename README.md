@@ -17,10 +17,18 @@ in the spirit of Desktop Goose, Tamagotchi and Clippy, but cute, calm and custom
 
 Claude Buddy isn't a looping sprite — it's a tiny simulation:
 
-- **A real brain.** A weighted behaviour state machine picks from **50+ behaviours**
+- **A real brain.** A weighted behaviour state machine picks from **90+ behaviours**
   (idle, walk, run, jump, sleep, dance, read, drink coffee, peek from screen edges,
-  chase sparkles, dream, climb the walls, backflip, power-up…) with probabilities,
-  cooldowns and anti-repetition.
+  chase sparkles, dream, climb the walls, backflip, power-up, sneeze, count its legs,
+  somersault, play a tiny guitar, show off a trophy…) with probabilities, cooldowns and
+  anti-repetition — plus sequenced **behaviour "stories"** and rare special moments.
+- **It chats.** A 600+ line Spanish phrasebook (observations, time-of-day quips, absurd
+  remarks, skin-aware self-talk) and a **400+ fun-fact** database feed always-on speech
+  bubbles, so it keeps surprising you for hours — and never says "I'm terracotta" while
+  wearing the Creeper skin.
+- **It remembers.** It tracks how many times you've thrown it, petted it, your record
+  throw height and how long you've been away — and brings it up ("you've thrown me 12
+  times now…", "welcome back!").
 - **A daily routine.** Energetic and coffee-carrying in the morning, exploratory in the
   afternoon, yawny in the evening, deeply asleep in the small hours — driven by your
   real clock.
@@ -39,6 +47,19 @@ Claude Buddy isn't a looping sprite — it's a tiny simulation:
   shivers with an icy thermometer when it's cold, fans itself when it's hot, and drops
   speech bubbles with the forecast, the ARS blue-dollar, the BTC price and fun facts —
   all from free public APIs (toggle it off for a fully offline buddy).
+- **It reacts to *your* desktop.** It strolls over to the real Windows taskbar clock and
+  tells you the time, peeks around screen corners, glances over when you switch apps, and
+  bounces (or ducks) when you turn the system volume up or down — all read-only, nothing
+  on your desktop is ever touched, and it works the same on Windows 10 and 11.
+- **Tiny cursor games.** Circle the cursor around it to make it dizzy, flick past it to
+  startle it, triple-double-click to tickle it — or just rest the cursor next to it for a
+  second and it'll **offer you a paw**.
+- **Imaginary props.** It conjures up little procedural objects to play with — a
+  magnifier, balloon, ice cream, mate, umbrella, guitar, camera, golden trophy and more —
+  all drawn from vectors, no images.
+- **A portal twin.** Once in a blue moon a second Claw'd drops out of a *Portal*-style
+  portal anywhere on screen, falls in with the real physics, looks around, waves, and
+  steps back through — and the real one does a double-take.
 - **Buttery motion.** Everything runs at 60 FPS with easing on every transition,
   squash-&-stretch landings, soft shadows and tiny particles. Nothing moves in a
   straight line.
@@ -60,6 +81,10 @@ always in the **Change Skin** menu:
 | **Ghast** | The floaty Minecraft ghast with dangling tentacles |
 | **Nicolaia** | A dapper fellow in a black top hat, three-piece suit and side-curls |
 | **Galgo (Bondi 34)** | A smiley cartoon city bus (line 34 Liniers–Palermo) in a Vélez Sarsfield hat |
+| **Among Us** | The classic crewmate — capsule body, visor that tracks the cursor, and a backpack |
+| **Pikachu** | Yellow block with long ears, a lightning-bolt tail and rosy cheeks |
+| **Mate** | A friendly Argentine mate gourd with green yerba and a metal bombilla |
+| **Ghost** | A Pac-Man-style ghost with a scalloped skirt and big cursor-following eyes |
 
 ## 🕹️ Controls
 
@@ -68,8 +93,10 @@ always in the **Change Skin** menu:
 | **Single click** | Open Claude Desktop (celebrates when it appears!) |
 | **Double click** | Pet the mascot — hearts, blush and a happy wiggle |
 | **Click & drag** | Pick it up — it hangs and stretches from where you grabbed it; whirl it to spin it, flick to throw it (spinning!) |
-| **Right click** | Open the full menu (skins, speed, behaviour frequency, startup, photo mode…) |
+| **Right click** | Open the full menu (skins, speed, behaviour frequency, startup, photo mode, **Play Animation** ▸ to trigger any single animation…) |
 | **Move mouse fast** | Startle it |
+| **Rest cursor beside it** | It offers you a paw 🐾 |
+| **Change the volume** | It reacts to the system volume going up or down |
 
 ## ⬇️ Install (no coding needed)
 

@@ -26,6 +26,7 @@ public sealed class Animator
     private float _typingIntensity; // 0..1, how fast the user is currently typing
     private float _dragSpeed;       // 0..1, how fast it's being dragged (paddles the legs)
     private float _dizziness;       // 0..1, current motion-sickness (adds an unsteady wobble)
+    private HeldPropKind _heldProp; // the imaginary prop the current HoldProp behaviour shows
 
     // Springy squash/stretch — gives landings and pose changes a little organic
     // overshoot instead of an easing-only "glide" that can feel mechanical.
@@ -58,6 +59,13 @@ public sealed class Animator
     /// its eyes can spiral. Set every frame from <see cref="Engine.Mascot.Dizziness"/>.
     /// </summary>
     public void SetDizziness(float dizziness01) => _dizziness = MathUtil.Clamp01(dizziness01);
+
+    /// <summary>
+    /// Sets which imaginary prop the <c>HoldProp</c> pose should show off. Set from the
+    /// engine when a prop behaviour begins (and back to <see cref="HeldPropKind.None"/> on
+    /// any other behaviour, so the prop fades away as Claw'd moves on).
+    /// </summary>
+    public void SetHeldProp(HeldPropKind prop) => _heldProp = prop;
 
     /// <summary>
     /// Advances the animator. <paramref name="lookX"/>/<paramref name="lookY"/> are the
@@ -128,6 +136,8 @@ public sealed class Animator
         t.SleepBubble = 0f;
         t.ThermometerProp = 0f;
         t.FanProp = 0f;
+        t.HeldProp = HeldPropKind.None;
+        t.HeldPropAmount = 0f;
 
         float p = _phase;
 
@@ -572,6 +582,254 @@ public sealed class Animator
                 t.FanProp = 1f;
                 break;
             }
+
+            case AnimationState.Sneeze:
+            {
+                // Two beats: a slow inhale (head rocks back, eyes scrunch, body rises and
+                // coils) then a sudden "¡achís!" snap down-and-forward that springs back.
+                const float build = 0.9f;
+                if (_stateTime < build)
+                {
+                    float a = Easing.InOutSine(MathUtil.Clamp01(_stateTime / build));
+                    t.HeadTilt = -0.32f * a;            // tip back
+                    t.BodyScaleY = 1f + (0.12f * a);    // inhale, stretch up
+                    t.BodyScaleX = 1f - (0.06f * a);
+                    t.BodyOffset = new Vector2(0f, -3f * a);
+                    t.EyeOpen = 1f - (0.85f * a);       // scrunch shut
+                    t.BrowAngle = 0.6f * a;
+                    t.MouthOpen = 0.15f + (0.25f * a);
+                }
+                else
+                {
+                    // The blow: a sharp forward lurch + squash that eases back out.
+                    float r = Easing.OutCubic(MathUtil.Clamp01((_stateTime - build) / 0.45f));
+                    float snap = (1f - r);              // 1 at the instant of the sneeze
+                    t.HeadTilt = 0.36f * snap;          // whip forward
+                    t.BodyLean = 0.3f * snap;
+                    t.BodyScaleY = 1f - (0.22f * snap);
+                    t.BodyScaleX = 1f + (0.18f * snap);
+                    t.BodyOffset = new Vector2(0f, 6f * snap);
+                    t.EyeOpen = 0.2f + (0.8f * r);
+                    t.MouthOpen = 0.7f * snap;
+                    t.MouthCurve = -0.1f;
+                }
+
+                break;
+            }
+
+            case AnimationState.Cough:
+            {
+                // Two or three sharp coughs into a raised "hand", head ducking with each.
+                float cough = MathF.Max(0f, MathF.Sin(_stateTime * 11f));
+                float pulse = cough * cough;             // snappier than a plain sine
+                t.ArmRight = 1.7f - (0.2f * pulse);      // hand near the mouth
+                t.HeadTilt = 0.1f + (0.16f * pulse);     // duck down on each cough
+                t.BodyOffset = new Vector2(0f, pulse * 3f);
+                t.BodyScaleY = 1f - (0.07f * pulse);
+                t.BodyScaleX = 1f + (0.05f * pulse);
+                t.MouthOpen = 0.1f + (0.3f * pulse);
+                t.EyeOpen = 1f - (0.4f * pulse);
+                t.BrowAngle = -0.2f;
+                t.MouthCurve = -0.1f;
+                break;
+            }
+
+            case AnimationState.LookUnder:
+            {
+                // Tips forward and cranes to peer underneath itself, puzzled, then back up.
+                float a = Easing.InOutSine(MathUtil.PingPong(_stateTime, 2.2f) / 2.2f);
+                t.BodyLean = 0.5f * a;
+                t.HeadTilt = 0.5f * a;
+                t.BodyOffset = new Vector2(0f, 6f * a);
+                t.BodyScaleY = 1f - (0.08f * a);
+                t.EyeLookY = 1f;                         // peering down
+                t.EyeLookX = MathF.Sin(_stateTime * 1.5f) * 0.4f;
+                t.BrowAngle = -0.2f + (0.3f * a);
+                t.MouthCurve = -0.05f;
+                t.ArmLeft = 0.8f * a;                    // bracing
+                break;
+            }
+
+            case AnimationState.CountLegs:
+            {
+                // Head down, eyes flicking leg to leg, bobbing as it counts — and loses count.
+                t.HeadTilt = 0.2f + (MathF.Sin(_stateTime * 3.5f) * 0.12f);
+                t.BodyLean = 0.12f;
+                t.BodyOffset = new Vector2(0f, 5f);
+                t.EyeLookY = 0.9f;
+                t.EyeLookX = MathF.Sin(_stateTime * 3.5f) * 0.7f;   // 1... 2... 3...
+                t.BrowAngle = -0.25f;
+                t.MouthCurve = -0.1f + (MathF.Sin(_stateTime * 0.6f) * 0.15f); // pursed, recounting
+                t.MouthOpen = 0.08f;
+                t.ThinkBubble = Easing.OutCubic(MathUtil.Clamp01(_stateTime / 0.6f));
+                break;
+            }
+
+            case AnimationState.Balance:
+            {
+                // Arms straight out, teetering on a thin edge — careful little corrections.
+                float teeter = MathF.Sin(_stateTime * 2.6f);
+                t.ArmLeft = 2.4f + (teeter * 0.2f);
+                t.ArmRight = 2.4f - (teeter * 0.2f);
+                t.BodyLean = teeter * 0.22f;
+                t.WholeBodyRotation = teeter * 0.12f;
+                t.HeadTilt = -teeter * 0.16f;            // counter-balance with the head
+                t.BodyOffset = new Vector2(teeter * 2f, 0f);
+                t.EyeOpen = 1.1f;
+                t.BrowAngle = 0.3f;
+                t.MouthOpen = 0.18f;                     // concentrating
+                t.MouthCurve = 0.1f;
+                break;
+            }
+
+            case AnimationState.Somersault:
+            {
+                // Crouch, then a quick forward tuck-and-roll that lands and pops upright.
+                const float crouch = 0.25f;
+                if (_stateTime < crouch)
+                {
+                    float c = MathUtil.Clamp01(_stateTime / crouch);
+                    t.BodyScaleY = 1f - (0.2f * c);
+                    t.BodyScaleX = 1f + (0.14f * c);
+                    t.BodyOffset = new Vector2(0f, 5f * c);
+                }
+                else
+                {
+                    float r = MathUtil.Clamp01((_stateTime - crouch) / 0.7f);
+                    t.WholeBodyRotation = -Easing.InOutSine(r) * MathUtil.Tau; // one tucked turn
+                    float tuck = MathF.Sin(r * MathF.PI);
+                    t.BodyScaleX = 1f + (0.12f * tuck);
+                    t.BodyScaleY = 1f - (0.12f * tuck);
+                    t.BodyOffset = new Vector2(0f, -10f * tuck);              // little airtime
+                    t.EyeOpen = 0.7f;
+                    t.MouthOpen = 0.3f;
+                    t.MouthCurve = 0.5f;
+                }
+
+                break;
+            }
+
+            case AnimationState.Embarrassed:
+            {
+                // Picks itself up, blushing hard, with sheepish glances side to side.
+                float up = Easing.OutCubic(MathUtil.Clamp01(_stateTime / 0.6f));
+                t.BodyOffset = new Vector2(0f, 8f * (1f - up));
+                t.BodyScaleY = 0.9f + (0.1f * up);
+                t.HeadTilt = 0.14f - (MathF.Sin(_stateTime * 1.4f) * 0.12f);
+                t.EyeLookX = MathF.Sin(_stateTime * 1.4f) * 0.7f;   // did anyone see?
+                t.EyeOpen = 0.85f;
+                t.Blush = 0.9f;
+                t.BrowAngle = -0.3f;
+                t.MouthCurve = -0.05f;
+                t.ArmLeft = 0.6f * up;                              // a bashful little rub
+                break;
+            }
+
+            case AnimationState.DustOff:
+            {
+                // Brisk brushing strokes down its sides, alternating, knocking dust off.
+                float brush = MathF.Sin(_stateTime * 14f);
+                bool rightSide = MathF.Sin(_stateTime * 2.2f) >= 0f;
+                t.ArmRight = rightSide ? 1.5f + (brush * 0.5f) : 0.2f;
+                t.ArmLeft = rightSide ? 0.2f : 1.5f - (brush * 0.5f);
+                t.BodyLean = (rightSide ? 0.08f : -0.08f);
+                t.HeadTilt = brush * 0.06f;
+                t.BodyOffset = new Vector2(0f, MathF.Abs(brush) * -1.5f);
+                t.MouthCurve = 0.3f;
+                t.EyeOpen = 0.95f;
+                break;
+            }
+
+            case AnimationState.Push:
+            {
+                // Bracing low and shoving forward with both "hands", grunting with effort —
+                // the cursor, of course, doesn't budge, so it keeps straining in little heaves.
+                float heave = MathF.Max(0f, MathF.Sin(_stateTime * 6f));
+                t.BodyLean = 0.4f + (heave * 0.12f);     // leaning hard into it
+                t.BodyOffset = new Vector2(0f, 3f - (heave * 1.5f));
+                t.BodyScaleX = 1.06f;                    // squished from the strain
+                t.BodyScaleY = 0.95f;
+                t.ArmLeft = 1.7f + (heave * 0.2f);       // both arms out, pushing
+                t.ArmRight = 1.7f + (heave * 0.2f);
+                t.HeadTilt = 0.1f;
+                t.BrowAngle = -0.5f;                     // gritted effort
+                t.MouthOpen = 0.25f + (heave * 0.2f);
+                t.MouthCurve = -0.15f;
+                t.EyeOpen = 0.7f;                        // scrunched with effort
+                t.LegPhase = MathUtil.HalfPi;            // feet planted, digging in
+                t.StrideAmount = 0f;
+                break;
+            }
+
+            case AnimationState.Pout:
+            {
+                // A sulk: turns its face away, raises both inner "arms" (crossed-arms feel),
+                // pushes out a big frowning lower lip, and gives the occasional huffy bob.
+                float huff = MathF.Sin(_stateTime * 2.2f);
+                t.HeadTilt = -0.22f + (huff * 0.04f);    // chin up, turned away
+                t.EyeLookX = -0.7f;                      // looking pointedly away
+                t.EyeLookY = -0.15f;
+                t.BrowAngle = -0.6f;                     // scowl
+                t.MouthCurve = -0.8f;                    // big frown / puchero
+                t.MouthOpen = 0.2f;                      // above the draw threshold so the frown shows
+                t.ArmLeft = 1.7f;                        // arms folded (inner legs up)
+                t.ArmRight = 1.7f;
+                t.BodyLean = -0.12f;                     // leaning away
+                t.BodyOffset = new Vector2(0f, huff * 1.2f);
+                t.Blush = 0.2f;
+                break;
+            }
+
+            case AnimationState.Slip:
+            {
+                // Feet fly out, body rocks back with flailing arms, then scrambles upright.
+                float k = MathF.Max(0f, 1f - (_stateTime / 1.3f)); // settles over ~1.3s
+                t.WholeBodyRotation = -MathF.Sin(_stateTime * 16f) * 0.4f * k;
+                t.BodyLean = -0.4f * k;
+                t.BodyOffset = new Vector2(0f, 6f * k);
+                t.BodyScaleY = 1f - (0.12f * k);
+                t.BodyScaleX = 1f + (0.1f * k);
+                t.ArmLeft = (-1.6f - (0.4f * MathF.Sin(_stateTime * 20f))) * k;  // windmilling
+                t.ArmRight = (-1.2f + (0.4f * MathF.Sin(_stateTime * 20f))) * k;
+                t.MouthOpen = 0.5f * k;
+                t.EyeOpen = 1f + (0.3f * k);
+                t.BrowAngle = 0.7f * k;
+                t.LegPhase = _stateTime * 22f;          // scrabbling feet
+                t.StrideAmount = 1.4f * k;
+                break;
+            }
+
+            case AnimationState.HoldProp:
+            {
+                // Conjures up a little imaginary prop and shows it off: raises a "hand"
+                // (outer leg) toward it, sways gently to present it, and gazes at it. Which
+                // prop is decided by the engine via SetHeldProp → drawn by the artist.
+                float appear = Easing.OutCubic(MathUtil.Clamp01(_stateTime / 0.5f));
+                t.HeldProp = _heldProp;
+                t.HeldPropAmount = appear;
+                t.ArmRight = 1.7f + (0.12f * MathF.Sin(_stateTime * 2.2f)); // present it
+                t.BodyLean = 0.05f + (MathF.Sin(_stateTime * 1.6f) * 0.03f);
+                t.BodyOffset = new Vector2(0f, MathF.Abs(MathF.Sin(_stateTime * 2.2f)) * -1.5f);
+                t.MouthCurve = 0.55f;
+                t.MouthOpen = 0.12f;
+
+                // A touch of per-prop gaze so each one reads a little differently.
+                switch (_heldProp)
+                {
+                    case HeldPropKind.Balloon:
+                    case HeldPropKind.Kite:
+                        t.EyeLookY = -0.7f; t.HeadTilt = -0.08f; break;        // looking up at it
+                    case HeldPropKind.Magnifier:
+                    case HeldPropKind.WateringCan:
+                        t.EyeLookY = 0.6f; t.HeadTilt = 0.12f; break;          // looking down at it
+                    case HeldPropKind.Binoculars:
+                        t.EyeLookY = -0.2f; t.EyeOpen = 0.6f; t.BrowAngle = 0.3f; break; // peering through
+                    default:
+                        t.EyeLookX = 0.35f; t.HeadTilt = 0.04f; break;         // looking at the held object
+                }
+
+                break;
+            }
         }
     }
 
@@ -677,7 +935,7 @@ public sealed class Animator
         bool eyesScripted = state is AnimationState.Sleep or AnimationState.Blink
             or AnimationState.Yawn or AnimationState.Stretch or AnimationState.WakeUp
             or AnimationState.Pet or AnimationState.Surprised or AnimationState.Scared
-            or AnimationState.Dizzy;
+            or AnimationState.Dizzy or AnimationState.Sneeze or AnimationState.Cough;
 
         _blinkTimer -= dt;
         if (!_blinking && _blinkTimer <= 0f)
@@ -770,5 +1028,14 @@ public sealed class Animator
         c.SleepBubble = MathUtil.Damp(c.SleepBubble, t.SleepBubble, 8f, dt);
         c.ThermometerProp = MathUtil.Damp(c.ThermometerProp, t.ThermometerProp, 9f, dt);
         c.FanProp = MathUtil.Damp(c.FanProp, t.FanProp, 9f, dt);
+
+        // Keep the prop *kind* fixed while it's on screen and only fade its visibility, so
+        // leaving the HoldProp pose lets the current prop ease out rather than vanish.
+        if (t.HeldPropAmount > 0.5f)
+        {
+            c.HeldProp = t.HeldProp;
+        }
+
+        c.HeldPropAmount = MathUtil.Damp(c.HeldPropAmount, t.HeldPropAmount, 9f, dt);
     }
 }

@@ -16,6 +16,8 @@ public sealed class LayeredWindow
     // The delegate must be kept alive for the lifetime of the window or the GC will
     // collect it and Windows will call into freed memory.
     private readonly NativeMethods.WndProc _wndProcDelegate;
+    private readonly string _className;
+    private readonly bool _passive; // a passive overlay (e.g. the clone) — no input, never quits the app
     private IntPtr _hwnd;
     private bool _running;
 
@@ -26,7 +28,22 @@ public sealed class LayeredWindow
     // (TrackPopupMenuEx) has hijacked the message pump and RunLoop is blocked.
     private Action? _onFrame;
 
-    public LayeredWindow() => _wndProcDelegate = WndProc;
+    public LayeredWindow()
+        : this(ClassName, passive: false)
+    {
+    }
+
+    /// <summary>
+    /// Creates a window backed by the given class. A <paramref name="passive"/> window is a
+    /// pure click-through overlay (used for the portal clone): it raises no input events and
+    /// — crucially — never posts WM_QUIT, so destroying it doesn't tear down the whole app.
+    /// </summary>
+    public LayeredWindow(string className, bool passive)
+    {
+        _wndProcDelegate = WndProc;
+        _className = className;
+        _passive = passive;
+    }
 
     // -- Input events (screen coordinates) ---------------------------------
     public event Action<int, int>? LeftButtonDown;
@@ -55,7 +72,7 @@ public sealed class LayeredWindow
             lpfnWndProc = _wndProcDelegate,
             hInstance = hInstance,
             hCursor = NativeMethods.LoadCursor(IntPtr.Zero, NativeMethods.IDC_ARROW),
-            lpszClassName = ClassName,
+            lpszClassName = _className,
         };
 
         NativeMethods.RegisterClassEx(ref wndClass);
@@ -65,15 +82,22 @@ public sealed class LayeredWindow
             | NativeMethods.WS_EX_TOOLWINDOW; // keep it out of Alt-Tab / taskbar
 
         _hwnd = NativeMethods.CreateWindowEx(
-            exStyle, ClassName, "Claude Buddy", NativeMethods.WS_POPUP,
+            exStyle, _className, "Claude Buddy", NativeMethods.WS_POPUP,
             0, 0, canvasSize, canvasSize,
             IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
         uint dpi = NativeMethods.GetDpiForWindow(_hwnd);
         DpiScale = dpi <= 0 ? 1.0f : dpi / 96f;
 
-        NativeMethods.ShowWindow(_hwnd, NativeMethods.SW_SHOWNOACTIVATE);
+        // A passive overlay (the clone) starts hidden; the engine shows it during the event.
+        NativeMethods.ShowWindow(_hwnd, _passive ? NativeMethods.SW_HIDE : NativeMethods.SW_SHOWNOACTIVATE);
     }
+
+    /// <summary>Shows the window without stealing focus (used to reveal the clone overlay).</summary>
+    public void Show() => NativeMethods.ShowWindow(_hwnd, NativeMethods.SW_SHOWNA);
+
+    /// <summary>Hides the window (the clone overlay between events).</summary>
+    public void Hide() => NativeMethods.ShowWindow(_hwnd, NativeMethods.SW_HIDE);
 
     public void SetTopmost(bool topmost)
     {
@@ -155,6 +179,13 @@ public sealed class LayeredWindow
 
     private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
+        // A passive overlay (the clone) handles nothing itself: no input events, and — most
+        // importantly — no PostQuitMessage on destroy, so closing it never quits the app.
+        if (_passive)
+        {
+            return NativeMethods.DefWindowProc(hWnd, msg, wParam, lParam);
+        }
+
         switch (msg)
         {
             case NativeMethods.WM_LBUTTONDOWN:

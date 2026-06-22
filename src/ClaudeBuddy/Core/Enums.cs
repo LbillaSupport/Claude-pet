@@ -20,6 +20,10 @@ public enum SkinStyle
     Ghast,
     Nicolaia,
     Galgo,
+    AmongUs,
+    Pikachu,
+    Mate,
+    Ghost,
 }
 
 /// <summary>
@@ -135,6 +139,69 @@ public enum AnimationState
     /// <summary>Dizzy: spiral eyes, a wobbling head and an unsteady stumble after a hard
     /// spin or collision. Recovers as the dizziness meter drains.</summary>
     Dizzy,
+
+    /// <summary>A big build-up inhale then an explosive "¡achís!" snap forward.</summary>
+    Sneeze,
+
+    /// <summary>A couple of little chest-convulsing coughs behind a raised "hand".</summary>
+    Cough,
+
+    /// <summary>Leans right over and tilts to peek underneath itself, puzzled.</summary>
+    LookUnder,
+
+    /// <summary>Feet shoot out from under it — a comedic slip and scramble-recover.</summary>
+    Slip,
+
+    /// <summary>Stares down at its legs, head bobbing as it tries (and fails) to count them.</summary>
+    CountLegs,
+
+    /// <summary>Arms out wide, teetering left and right keeping its balance on a thin edge.</summary>
+    Balance,
+
+    /// <summary>A quick forward tuck-and-roll somersault that lands on its feet.</summary>
+    Somersault,
+
+    /// <summary>Gets up after a tumble, blushing and glancing around, hoping nobody saw.</summary>
+    Embarrassed,
+
+    /// <summary>Brisk little brushing motions to dust itself off (puffs of dust).</summary>
+    DustOff,
+
+    /// <summary>Sulky puchero: turns away, big frown, raised inner legs (arms crossed feel).</summary>
+    Pout,
+
+    /// <summary>Proudly shows off a little imaginary prop (which one = <see cref="Pose.HeldProp"/>).</summary>
+    HoldProp,
+
+    /// <summary>Leans in hard and strains, trying (and failing) to push the cursor.</summary>
+    Push,
+}
+
+/// <summary>
+/// A tiny imaginary object Claw'd can conjure up and show off. Purely cosmetic — drawn
+/// procedurally by <see cref="Rendering.CharacterArtist"/> on the generic "held prop"
+/// channel (one <see cref="Animation.Pose.HeldProp"/> + amount), so adding one is a draw
+/// method and a catalogue line, no new Pose fields.
+/// </summary>
+public enum HeldPropKind
+{
+    None,
+    Magnifier,
+    Balloon,
+    Flag,
+    Flashlight,
+    IceCream,
+    Mate,
+    Binoculars,
+    PaintBrush,
+    ToyHammer,
+    Sword,
+    Kite,
+    WateringCan,
+    Umbrella,
+    Guitar,
+    Camera,
+    Trophy,
 }
 
 /// <summary>The visual primitive a particle is rendered as.</summary>
@@ -180,6 +247,10 @@ public enum MenuCommand
     ToggleWorldData,
     ResetPosition,
     PhotoMode,
+
+    /// <summary>Force-play a specific animation/behaviour (the "Play Animation" submenu).
+    /// The chosen behaviour id rides in <see cref="UI.MenuSelection.SkinId"/>.</summary>
+    PlayAnimation,
     Achievements,
     Mods,
     Settings,
