@@ -30,6 +30,10 @@ crash.log
 
 # Temporary screenshots from the visual-verification loop
 _*.png
+_*.gif
+
+# Temporary render-frame output for building the demo GIF (the GIF itself lives in docs/assets)
+_frames/
 
 # Velopack / release packaging output
 Releases/

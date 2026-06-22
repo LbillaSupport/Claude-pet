@@ -44,6 +44,17 @@ internal static class Program
             return RenderSkinToFile(args[1], args[2], sz, prop);
         }
 
+        // Marketing helper: `ClaudeBuddy --render-frames <skinId> <outDir> [sizePx]` renders a
+        // short showcase of several animations (run through the real Animator) as numbered PNG
+        // frames into <outDir> — deterministic, no window, no live screen capture. A small build
+        // script stitches them into the animated GIF for the README (System.Drawing has a proven
+        // GIF encoder, so we don't ship a hand-rolled one in the app).
+        if (args.Length >= 3 && args[0] == "--render-frames")
+        {
+            int sz = args.Length >= 4 && int.TryParse(args[3], out int gn) ? gn : 320;
+            return RenderFramesToDir(args[1], args[2], sz);
+        }
+
         using var mutex = new Mutex(initiallyOwned: true, "ClaudeBuddy.SingleInstance.v1", out bool isNew);
         if (!isNew)
         {
@@ -225,6 +236,109 @@ internal static class Program
             using SkiaSharp.SKData data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
             using FileStream fs = File.Create(outPath);
             data.SaveTo(fs);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            LogCrash(ex);
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// Renders a short looping showcase of several animations to an animated GIF, running the
+    /// real <see cref="Animator"/> so the motion is identical to the live app. Deterministic and
+    /// window-free — used to produce the README demo without any live screen capture.
+    /// </summary>
+    private static int RenderFramesToDir(string skinId, string outDir, int size)
+    {
+        try
+        {
+            Directory.CreateDirectory(outDir);
+
+            var skins = new SkinManager();
+            skins.Discover(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+
+            var artist = new CharacterArtist();
+            var animator = new Animator(new Core.Rng());
+            var mascot = new ClaudeBuddy.Engine.Mascot();
+            var emotion = new ClaudeBuddy.Emotions.EmotionState();
+
+            float anchorX = size * 0.5f;
+            float anchorY = size * 0.62f;
+            float height = size * 0.40f;
+            var info = new SkiaSharp.SKImageInfo(size, size, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+
+            void Save(SkiaSharp.SKSurface surface, ref int n)
+            {
+                using SkiaSharp.SKImage img = surface.Snapshot();
+                using SkiaSharp.SKData data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                using FileStream fs = File.Create(Path.Combine(outDir, $"frame_{n:D4}.png"));
+                data.SaveTo(fs);
+                n++;
+            }
+
+            int frameNo = 0;
+
+            // "showcase" = a continuous spin that cycles through every skin, each shown for one
+            // full turn, so the README demo shows all the characters AND the animation at once.
+            if (string.Equals(skinId, "showcase", StringComparison.OrdinalIgnoreCase))
+            {
+                string[] ids = { "classic", "pikachu", "amongus", "ghost", "mate", "creeper", "ghast", "nicolaia", "galgo" };
+                const int framesPerSkin = 22; // one full 360° turn per skin
+                mascot.Animation = AnimationState.Idle;
+
+                foreach (string id in ids)
+                {
+                    skins.SetCurrent(id);
+                    for (int f = 0; f < framesPerSkin; f++)
+                    {
+                        animator.Update(mascot, emotion, 1f / 24f, lookX: 0f, lookY: 0f);
+                        Pose pose = animator.Current;
+                        // Drive a clean, continuous full turn ourselves (independent of any state).
+                        pose.WholeBodyRotation = (f / (float)framesPerSkin) * (MathF.PI * 2f);
+
+                        using SkiaSharp.SKSurface surface = SkiaSharp.SKSurface.Create(info);
+                        surface.Canvas.Clear(new SkiaSharp.SKColor(0x14, 0x14, 0x18));
+                        artist.Draw(surface.Canvas, new SkiaSharp.SKPoint(anchorX, anchorY), anchorY, height,
+                            Facing.Right, 1f, 1f, pose, skins.Current.Palette, 1f);
+                        Save(surface, ref frameNo);
+                    }
+                }
+
+                return 0;
+            }
+
+            // Otherwise: a little story of several animations on one skin.
+            skins.SetCurrent(skinId);
+            (AnimationState State, int Frames)[] beats =
+            {
+                (AnimationState.Wave, 24),
+                (AnimationState.Happy, 18),
+                (AnimationState.Dance, 40),
+                (AnimationState.Spin, 24),
+                (AnimationState.Pet, 24),
+                (AnimationState.Dizzy, 36),
+                (AnimationState.Stretch, 24),
+                (AnimationState.Idle, 16),
+            };
+
+            const float dt = 1f / 24f; // 24 fps demo
+            foreach ((AnimationState state, int frames) in beats)
+            {
+                mascot.Animation = state;
+                mascot.Dizziness = state == AnimationState.Dizzy ? 1f : 0f;
+                for (int f = 0; f < frames; f++)
+                {
+                    animator.Update(mascot, emotion, dt, lookX: 0.15f, lookY: 0.1f);
+                    using SkiaSharp.SKSurface surface = SkiaSharp.SKSurface.Create(info);
+                    surface.Canvas.Clear(new SkiaSharp.SKColor(0x14, 0x14, 0x18));
+                    artist.Draw(surface.Canvas, new SkiaSharp.SKPoint(anchorX, anchorY), anchorY, height,
+                        Facing.Right, mascot.SquashX, mascot.SquashY, animator.Current, skins.Current.Palette, 1f);
+                    Save(surface, ref frameNo);
+                }
+            }
+
             return 0;
         }
         catch (Exception ex)

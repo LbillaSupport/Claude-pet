@@ -9,6 +9,12 @@ in the spirit of Desktop Goose, Tamagotchi and Clippy, but cute, calm and custom
 
 *Single click opens Claude. Double click pets it. Drag it around. Watch it live its little life.*
 
+<br>
+
+<img src="docs/assets/showcase.gif" width="240" alt="Claude Buddy spinning through all of its skins" />
+
+<sub>Every character is drawn from vectors — no images. Here it spins through all nine built-in skins.</sub>
+
 </div>
 
 ---
@@ -71,20 +77,25 @@ shapes, which means it's crisp at any DPI, animates infinitely smoothly, and a b
 new **skin is just seven colours** in a tiny JSON file. Drop a folder in `/Skins` and
 it shows up in the menu instantly.
 
-A few skins go further and change the whole silhouette — these ship built-in and are
-always in the **Change Skin** menu:
+A few skins go further and change the whole silhouette — **nine ship built-in** and are
+always in the **Change Skin** menu (drop a JSON folder in `/Skins` to add your own):
 
-| Skin | Look |
-| --- | --- |
-| **Classic Claude** | The iconic terracotta "Claw'd" block with square eyes |
-| **Creeper** | The Minecraft creeper face |
-| **Ghast** | The floaty Minecraft ghast with dangling tentacles |
-| **Nicolaia** | A dapper fellow in a black top hat, three-piece suit and side-curls |
-| **Galgo (Bondi 34)** | A smiley cartoon city bus (line 34 Liniers–Palermo) in a Vélez Sarsfield hat |
-| **Among Us** | The classic crewmate — capsule body, visor that tracks the cursor, and a backpack |
-| **Pikachu** | Yellow block with long ears, a lightning-bolt tail and rosy cheeks |
-| **Mate** | A friendly Argentine mate gourd with green yerba and a metal bombilla |
-| **Ghost** | A Pac-Man-style ghost with a scalloped skirt and big cursor-following eyes |
+<table align="center">
+<tr>
+<td align="center"><img src="docs/assets/skins/classic.png" width="110"><br><sub><b>Classic</b></sub></td>
+<td align="center"><img src="docs/assets/skins/pikachu.png" width="110"><br><sub><b>Pikachu</b></sub></td>
+<td align="center"><img src="docs/assets/skins/amongus.png" width="110"><br><sub><b>Among Us</b></sub></td>
+<td align="center"><img src="docs/assets/skins/ghost.png" width="110"><br><sub><b>Ghost</b></sub></td>
+<td align="center"><img src="docs/assets/skins/mate.png" width="110"><br><sub><b>Mate</b></sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/assets/skins/creeper.png" width="110"><br><sub><b>Creeper</b></sub></td>
+<td align="center"><img src="docs/assets/skins/ghast.png" width="110"><br><sub><b>Ghast</b></sub></td>
+<td align="center"><img src="docs/assets/skins/nicolaia.png" width="110"><br><sub><b>Nicolaia</b></sub></td>
+<td align="center"><img src="docs/assets/skins/galgo.png" width="110"><br><sub><b>Galgo (bus)</b></sub></td>
+<td align="center"><sub>+ your own<br>(JSON)</sub></td>
+</tr>
+</table>
 
 ## 🕹️ Controls
 

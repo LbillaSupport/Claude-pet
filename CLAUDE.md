@@ -302,6 +302,20 @@ verify a skin's look instead of screenshotting the live mascot (which walks out 
 instantiates `CharacterArtist` + a neutral `Pose` directly and renders at `height = size*0.42`
 with feet at `size*0.62` (leaves headroom for hats/buses).
 
+### `--render-frames` + the demo GIF (README marketing visuals)
+`ClaudeBuddy --render-frames <skinId|showcase> <outDir> [sizePx]` runs the **real `Animator`**
+and writes numbered PNG frames (`frame_0000.png`…) — deterministic, window-free, NO live screen
+capture (the user explicitly does not want capture bursts). `skinId` = a little story of several
+animations on one skin; the special id **`showcase`** = a continuous full-turn spin that cycles
+through every skin (one 360° turn each — the README hero GIF). `tools/GifAssembler.ps1` then
+stitches the frames into a looping GIF using the **GDI+ (`System.Drawing`) native encoder**
+(`Save`+`SaveAdd`), then byte-patches in the per-frame delay + a NETSCAPE2.0 loop block (GDI+
+writes neither). No ffmpeg/ImageMagick needed. **Gotcha:** to verify a frame OUT of the finished
+GIF, extract it with `Graphics.DrawImage` onto a fresh `Bitmap` — the `new Bitmap(image)` overload
+copies the raw indexed buffer and renders as colour noise (this cost a lot of debugging time; the
+GIF itself was fine). The demo GIF lives at `docs/assets/showcase.gif`; the skin gallery PNGs at
+`docs/assets/skins/`. `_frames/` and `_*.gif` are gitignored.
+
 ## Session battery is TIME-based (not token-%)
 
 The battery shows **time left in the active 5-hour window**, not a token percentage. Why:
