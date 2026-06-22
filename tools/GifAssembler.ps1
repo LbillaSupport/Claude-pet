@@ -2,8 +2,12 @@
 #
 # Why a script and not the app: the app emits clean PNG frames (Skia), and we stitch them here.
 # Windows has no ffmpeg/ImageMagick by default, so this drives the GDI+ (System.Drawing) native
-# GIF encoder via Save + SaveAdd (the documented multi-frame path), then patches the per-frame
-# delay and the NETSCAPE loop block into the bytes (GDI+ writes neither). All built-in, no tools.
+# GIF encoder via Save + SaveAdd (the documented multi-frame path). The per-frame delay and the
+# loop-forever flag are set through GDI+ PropertyItems (0x5100 FrameDelay, 0x5101 LoopCount) on
+# the FIRST bitmap before encoding — the supported way, so GDI+ writes correct Graphic-Control
+# blocks itself. (An earlier version byte-patched the delays by scanning for 0x21F904, which
+# also matched that sequence INSIDE a frame's LZW data and corrupted a frame mid-GIF — that made
+# the GIF stop partway and not loop. PropertyItems avoid touching the byte stream entirely.)
 #
 # Usage: .\tools\GifAssembler.ps1 -FramesDir _frames -Out docs\assets\demo.gif -DelayCs 5
 
@@ -32,9 +36,33 @@ $epFlush = New-Object System.Drawing.Imaging.EncoderParameters 1
 $epFlush.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter(
     [System.Drawing.Imaging.Encoder]::SaveFlag, [long][System.Drawing.Imaging.EncoderValue]::Flush)
 
-$tmp = [System.IO.Path]::GetTempFileName() + ".gif"
+# A PropertyItem can't be `new`'d directly; clone one off any existing image, then overwrite it.
+function New-PropItem([int]$id, [int]$type, [byte[]]$value) {
+    $pi = $template.PropertyItems[0]
+    $pi.Id = $id
+    $pi.Type = $type      # 3 = SHORT (16-bit), 4 = LONG (32-bit)
+    $pi.Len = $value.Length
+    $pi.Value = $value
+    return $pi
+}
+
 $first = [System.Drawing.Bitmap]::FromFile($files[0].FullName)
-$first.Save($tmp, $gifCodec, $epMulti)
+$template = $first  # PropertyItems[0] exists on a loaded PNG; we reuse its shape
+
+# 0x5100 FrameDelay: one 32-bit LE value per frame, in centiseconds.
+$delayBytes = New-Object System.Collections.Generic.List[byte]
+for ($f = 0; $f -lt $files.Count; $f++) {
+    $delayBytes.Add([byte]($DelayCs -band 0xFF))
+    $delayBytes.Add([byte](($DelayCs -shr 8) -band 0xFF))
+    $delayBytes.Add([byte](($DelayCs -shr 16) -band 0xFF))
+    $delayBytes.Add([byte](($DelayCs -shr 24) -band 0xFF))
+}
+$first.SetPropertyItem((New-PropItem 0x5100 4 $delayBytes.ToArray()))
+
+# 0x5101 LoopCount: 16-bit, 0 = loop forever.
+$first.SetPropertyItem((New-PropItem 0x5101 3 ([byte[]]@(0x00, 0x00))))
+
+$first.Save($Out, $gifCodec, $epMulti)
 for ($i = 1; $i -lt $files.Count; $i++) {
     $b = [System.Drawing.Bitmap]::FromFile($files[$i].FullName)
     $first.SaveAdd($b, $epNext)
@@ -43,31 +71,5 @@ for ($i = 1; $i -lt $files.Count; $i++) {
 $first.SaveAdd($epFlush)
 $first.Dispose()
 
-# --- Patch in per-frame delays + a NETSCAPE loop block (GDI+ omits both) ---
-$bytes = [System.Collections.Generic.List[byte]]::new()
-$bytes.AddRange([System.IO.File]::ReadAllBytes($tmp))
-Remove-Item $tmp -Force
-
-# Insert the NETSCAPE2.0 loop extension right after the Logical Screen Descriptor + Global
-# Colour Table (so it precedes the first frame).
-$gctFlags = $bytes[10]
-$gctSize = 0
-if (($gctFlags -band 0x80) -ne 0) { $gctSize = 3 * [math]::Pow(2, ($gctFlags -band 0x07) + 1) }
-$insertAt = 13 + [int]$gctSize
-$loop = New-Object System.Collections.Generic.List[byte]
-$loop.AddRange([byte[]]@(0x21, 0xFF, 0x0B))
-$loop.AddRange([System.Text.Encoding]::ASCII.GetBytes("NETSCAPE2.0"))
-$loop.AddRange([byte[]]@(0x03, 0x01, 0x00, 0x00, 0x00))
-$bytes.InsertRange($insertAt, $loop)
-
-# Patch every Graphic Control Extension's delay field (bytes 4-5 of each GCE) to $DelayCs.
-for ($i = 0; $i -lt $bytes.Count - 8; $i++) {
-    if ($bytes[$i] -eq 0x21 -and $bytes[$i + 1] -eq 0xF9 -and $bytes[$i + 2] -eq 0x04) {
-        $bytes[$i + 4] = [byte]($DelayCs -band 0xFF)
-        $bytes[$i + 5] = [byte](($DelayCs -shr 8) -band 0xFF)
-    }
-}
-
-[System.IO.File]::WriteAllBytes($Out, $bytes.ToArray())
 $sizeKb = [math]::Round((Get-Item $Out).Length / 1KB)
-Write-Host "GIF written: $Out  ($($files.Count) frames, ${sizeKb}KB, delay ${DelayCs}cs)"
+Write-Host "GIF written: $Out  ($($files.Count) frames, ${sizeKb}KB, delay ${DelayCs}cs, loop forever)"
