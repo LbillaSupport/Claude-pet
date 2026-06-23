@@ -16,22 +16,45 @@ namespace ClaudeBuddy.Content;
 public sealed class Phrasebook
 {
     private readonly Rng _rng;
+    private readonly Localization _loc;
 
     // The last few lines spoken, across every pool, so picks never echo recently.
     private readonly Queue<string> _recent = new();
     private const int RecentMemory = 18;
 
-    public Phrasebook(Rng rng) => _rng = rng;
+    public Phrasebook(Rng rng, Localization loc)
+    {
+        _rng = rng;
+        _loc = loc;
+    }
+
+    /// <summary>
+    /// Chooses a pool by the active language. Spanish keeps its original (large, characterful)
+    /// pools; every other language uses the English pool — the shared global fallback — unless a
+    /// dedicated one is supplied. This lets us translate category-by-category over time without
+    /// ever leaving a language with empty chatter.
+    /// </summary>
+    private string[] ByLang(string[] english, string[] spanish, string[]? portuguese = null,
+        string[]? french = null, string[]? german = null, string[]? italian = null) =>
+        _loc.Current switch
+        {
+            Language.Spanish => spanish,
+            Language.Portuguese => portuguese ?? english,
+            Language.French => french ?? english,
+            Language.German => german ?? english,
+            Language.Italian => italian ?? english,
+            _ => english,
+        };
 
     // ===================================================================
     //  Public picks (each applies the cross-pool anti-repeat)
     // ===================================================================
 
     /// <summary>"Are you still there?" — fires when the user has been idle a while.</summary>
-    public string Observation() => Pick(Observations);
+    public string Observation() => Pick(ByLang(ObservationsEn, Observations));
 
     /// <summary>An absurd, out-of-nowhere remark.</summary>
-    public string Absurd() => Pick(AbsurdLines);
+    public string Absurd() => Pick(ByLang(AbsurdLinesEn, AbsurdLines));
 
     /// <summary>
     /// A self-aware quip. Skin-aware: half the time it's a line that fits ANY shape, half
@@ -42,39 +65,39 @@ public sealed class Phrasebook
     {
         string[] specific = style switch
         {
-            SkinStyle.Creeper => SelfCreeper,
-            SkinStyle.Ghast => SelfGhast,
-            SkinStyle.Nicolaia => SelfNicolaia,
-            SkinStyle.Galgo => SelfGalgo,
-            SkinStyle.AmongUs => SelfAmongUs,
-            SkinStyle.Pikachu => SelfPikachu,
-            SkinStyle.Mate => SelfMate,
-            SkinStyle.Ghost => SelfGhost,
-            _ => SelfClaud,
+            SkinStyle.Creeper => ByLang(SelfCreeperEn, SelfCreeper),
+            SkinStyle.Ghast => ByLang(SelfGhastEn, SelfGhast),
+            SkinStyle.Nicolaia => ByLang(SelfNicolaiaEn, SelfNicolaia),
+            SkinStyle.Galgo => ByLang(SelfGalgoEn, SelfGalgo),
+            SkinStyle.AmongUs => ByLang(SelfAmongUsEn, SelfAmongUs),
+            SkinStyle.Pikachu => ByLang(SelfPikachuEn, SelfPikachu),
+            SkinStyle.Mate => ByLang(SelfMateEn, SelfMate),
+            SkinStyle.Ghost => ByLang(SelfGhostEn, SelfGhost),
+            _ => ByLang(SelfClaudEn, SelfClaud),
         };
 
-        return _rng.Chance(0.5f) ? Pick(SelfGeneric) : Pick(specific);
+        return _rng.Chance(0.5f) ? Pick(ByLang(SelfGenericEn, SelfGeneric)) : Pick(specific);
     }
 
     /// <summary>A random fun fact from the big pool.</summary>
-    public string FunFact() => Pick(FunFacts);
+    public string FunFact() => Pick(ByLang(FunFactsEn, FunFacts));
 
     /// <summary>A line that fits the current hour of day.</summary>
     public string TimeComment(int hour) => Pick(TimePool(hour));
 
     /// <summary>A line for when the user comes back after being away.</summary>
-    public string Welcome() => Pick(WelcomeLines);
+    public string Welcome() => Pick(ByLang(WelcomeLinesEn, WelcomeLines));
 
     /// <summary>A grumpy line for when the buddy is handled too roughly.</summary>
-    public string Annoyed() => Pick(AnnoyedLines);
+    public string Annoyed() => Pick(ByLang(AnnoyedLinesEn, AnnoyedLines));
 
     private string[] TimePool(int hour) => hour switch
     {
-        < 6 => LateNight,
-        < 12 => Morning,
-        < 14 => Noon,
-        < 19 => Afternoon,
-        _ => Night,
+        < 6 => ByLang(LateNightEn, LateNight),
+        < 12 => ByLang(MorningEn, Morning),
+        < 14 => ByLang(NoonEn, Noon),
+        < 19 => ByLang(AfternoonEn, Afternoon),
+        _ => ByLang(NightEn, Night),
     };
 
     /// <summary>Picks a line not shown in the recent window (best-effort, a few tries).</summary>
@@ -361,6 +384,14 @@ public sealed class Phrasebook
         "Naci de un par de figuras vectoriales y mucho cariño.",
         "Dicen que parezco un ladrillito. Me gusta.",
         "Mis esquinas estan apenas redondeadas, todo un detalle.",
+        "Soy del color de una maceta, pero con onda.",
+        "Claw'd para los amigos.",
+        "Un bloque puede tener sentimientos, ¿sabias?",
+        "No me oxido, soy terracota digital.",
+        "Si me ves de perfil... bueno, sigo siendo un cuadrado.",
+        "Hecho a mano, pixel por pixel. Bah, vector por vector.",
+        "Mi abuelo era un ladrillo de verdad. Que en paz descanse.",
+        "Cuadrado por fuera, blandito por dentro.",
     };
 
     private static readonly string[] SelfCreeper =
@@ -377,6 +408,14 @@ public sealed class Phrasebook
         "Mi cara da miedo, pero soy un blandito por dentro.",
         "Aviso: abrazos a tu propio riesgo.",
         "Salgo de noche, como buen Creeper que se respeta.",
+        "No traigo TNT, lo prometo... casi.",
+        "Me asusta mas un gato que vos a mi.",
+        "Si me prendo en verde, corre. Es chiste.",
+        "Cuatro patitas y cero brazos para abrazarte. Que injusto.",
+        "Naci en una cueva, pero me gusta tu escritorio.",
+        "Pssss... ¿escuchaste eso? Era mi estomago.",
+        "El sol me molesta, prefiero la oscuridad.",
+        "Soy explosivo solo de personalidad.",
     };
 
     private static readonly string[] SelfGhast =
@@ -391,6 +430,13 @@ public sealed class Phrasebook
         "Soy nube, soy llanto, soy misterio.",
         "Floto por el escritorio como alma en pena, pero feliz.",
         "No tengo patas, asi que la gravedad y yo no hablamos.",
+        "Vivo entre las nubes, pero me baje a visitarte.",
+        "Cuando abro la boca, mejor corre. O no, soy tierno.",
+        "Mis lagrimas flotan en vez de caer. Que poetico.",
+        "Soy grande, blanco y melancolico. Como un suspiro.",
+        "Si me ves triste, es mi cara de siempre.",
+        "Tirar bolas de fuego cansa, mejor floto y ya.",
+        "Soy de otro mundo, literalmente.",
     };
 
     private static readonly string[] SelfNicolaia =
@@ -406,6 +452,14 @@ public sealed class Phrasebook
         "Buenas tardes, distinguido usuario.",
         "El frac me queda impecable, ¿verdad?",
         "Modales primero, codigo despues.",
+        "Un caballero nunca revela su edad. Ni su version.",
+        "Me visto de etiqueta hasta para dormir.",
+        "El monoculo lo dejé en casa, disculpas.",
+        "Camino con la elegancia de un reloj suizo.",
+        "¿Un te? Yo invito, faltaba mas.",
+        "La puntualidad es la cortesia de los bloques.",
+        "Mis patillas estan peinadas a la perfeccion.",
+        "Hago todo con clase, hasta tropezar.",
     };
 
     private static readonly string[] SelfGalgo =
@@ -422,6 +476,14 @@ public sealed class Phrasebook
         "Aguante el Fortin, no me hagan renegar.",
         "Por dentro tengo asientos, por fuera tengo flow.",
         "Si me ves doblar, avisa que voy fuerte.",
+        "Pará en la esquina que me bajo. Ah, no, soy yo.",
+        "Tengo mas kilometros que tu auto.",
+        "El boleto sale dos pesos con cincuenta... de los de antes.",
+        "Choferes van y vienen, yo sigo firme.",
+        "De Liniers a Palermo y vuelta, sin chistar.",
+        "Mi motor ronronea como gato fierrero.",
+        "Capaz vengo lleno, pero siempre hay lugar para vos.",
+        "Soy patrimonio porteño, ¡respeten!",
     };
 
     private static readonly string[] SelfAmongUs =
@@ -433,6 +495,14 @@ public sealed class Phrasebook
         "Rojo siempre es sospechoso, lo se.",
         "Reporto cuerpo... ah, no, era una sombra.",
         "Camino raro porque no tengo rodillas.",
+        "Estaba en electrico, no en ventilacion, lo juro.",
+        "¿Viste algo? Yo no vi nada. Sospechoso, ¿no?",
+        "Tarea completada... o eso quiero que creas.",
+        "Soy rojo, pero no por verguenza.",
+        "Emergencia: alguien dijo mi nombre.",
+        "Skip, skip, ¡que arranque la votacion!",
+        "Si me expulsan, igual los visito.",
+        "Tengo una mochila, pero no se que guardo.",
     };
 
     private static readonly string[] SelfPikachu =
@@ -444,6 +514,14 @@ public sealed class Phrasebook
         "Mi cola es un rayo, no me la pises.",
         "Pika pika... eso significa hola.",
         "Tengo energia de sobra, literal.",
+        "No me metas en una pokebola, prefiero tu escritorio.",
+        "Mis cachetes generan electricidad. Cuidado al tocar.",
+        "Soy chiquito pero te tiro un rayo si me buscas.",
+        "¿Viste mi cola? Es un rayo, no me la copies.",
+        "Un bichito amarillo nunca pasa de moda.",
+        "Pika pika pikaaa (eso fue profundo).",
+        "Si me cuidas, evoluciono... de humor.",
+        "Corro rapido y brillo mas rapido todavia.",
     };
 
     private static readonly string[] SelfMate =
@@ -455,6 +533,14 @@ public sealed class Phrasebook
         "Amargo o dulce, yo banco las dos.",
         "La bombilla no se revuelve, por favor.",
         "Un mate y se arregla cualquier dia.",
+        "Cebá vos que yo ya estoy lavado.",
+        "Yerba sin palo, como debe ser.",
+        "El mate lavado avisa: cambiame la yerba.",
+        "Tres cosas no se prestan: la mujer, el caballo y el mate.",
+        "Un mate amargo a la mañana y soy otro.",
+        "Si la bombilla se tapa, paciencia y soplido.",
+        "Termo cargado, dia ganado.",
+        "Soy redondito y lleno de buena onda... y cafeina.",
     };
 
     private static readonly string[] SelfGhost =
@@ -466,6 +552,14 @@ public sealed class Phrasebook
         "No como puntos, como cariño.",
         "Soy rosa y doy mello, que combo.",
         "Floto por el escritorio sin hacer ruido.",
+        "No te asustes, hoy ando de buen humor.",
+        "Me escape del laberinto y aterricé en tu pantalla.",
+        "Si parpadeas, ya me movi. Buuu.",
+        "Atravieso paredes, pero respeto tus ventanas.",
+        "Mis ojitos te siguen a todos lados. Tierno, ¿no?",
+        "De fantasma a amigo en dos segundos.",
+        "Persigo cariño, no sustos.",
+        "Soy translucido, pero mi afecto es solido.",
     };
 
     // ===================================================================
@@ -912,5 +1006,406 @@ public sealed class Phrasebook
         "El olor a libro viejo viene de la lenta descomposicion del papel.",
         "Las teclas QWERTY se ordenaron asi para no trabar las maquinas de escribir.",
         "El color rosa, fisicamente, no existe en el arcoiris; lo arma tu cerebro.",
+    };
+
+    // ===================================================================
+    //  English pools (the global fallback for every non-Spanish language).
+    //  Translations keep the original's playful, warm, slightly silly tone.
+    // ===================================================================
+
+    private static readonly string[] ObservationsEn =
+    {
+        "You haven't moved the mouse in a while...",
+        "Still there?",
+        "I think I distracted you...",
+        "Working, or watching YouTube?",
+        "I promise I'm not judging.",
+        "Was that an Alt+Tab?",
+        "You've gone all quiet...",
+        "Thinking about something important?",
+        "If you need a break, just say so.",
+        "I'll wait, no rush.",
+        "Coffee, or a nap?",
+        "The cursor hasn't moved in a bit.",
+        "Everything okay over there?",
+        "I can wait all day, literally.",
+        "Did you leave without telling me?",
+        "I'll pretend to look busy until you're back.",
+        "Hi, still down here.",
+        "Long meeting?",
+        "I'll stretch my legs while I wait.",
+        "Silence... I like it.",
+        "Keep going, or take a breather?",
+        "Don't touch anything, I'll be right... oh, it's you.",
+        "You're really focused today.",
+        "I'm watching you out of the corner of my eye.",
+        "Blink once in a while, it's good for you.",
+        "Drink some water, go on.",
+        "Was that your fifth Stack Overflow tab?",
+        "Take it easy on that keyboard.",
+        "I'll guard the desktop, go ahead.",
+    };
+
+    private static readonly string[] MorningEn =
+    {
+        "Good morning.",
+        "Today's going to be a great day.",
+        "Still a bit sleepy.",
+        "Shall we get going?",
+        "First coffee, then code.",
+        "Good morning, boss.",
+        "Let's make something awesome today.",
+        "I woke up full of energy.",
+        "Did you have breakfast? I didn't, no mouth.",
+        "A productive morning, I hope.",
+        "Let's go, world's not gonna code itself.",
+        "The first commit of the day is always the nicest.",
+        "You're up early. Respect.",
+    };
+
+    private static readonly string[] NoonEn =
+    {
+        "Lunchtime.",
+        "Did you eat?",
+        "Noon, my favourite hour.",
+        "The stomach is in charge now.",
+        "A break to eat never hurt anyone.",
+        "What's for lunch?",
+        "I run on pixels, myself.",
+        "Get up from the chair, even just for a snack.",
+        "Don't code on an empty stomach.",
+        "Eat something green, not just coffee.",
+    };
+
+    private static readonly string[] AfternoonEn =
+    {
+        "The afternoon's looking calm.",
+        "A tea break would be nice.",
+        "Mid-afternoon, second wind.",
+        "Afternoons are great for coding.",
+        "This is the best hour to focus.",
+        "The 4pm slump is real.",
+        "Quiet afternoon, I like it.",
+        "Slow and steady.",
+        "Almost there, hang in a bit longer.",
+        "Second coffee of the day: approved.",
+    };
+
+    private static readonly string[] NightEn =
+    {
+        "Still coding?",
+        "Don't forget to rest.",
+        "It's night already, you know.",
+        "A little longer and then bed.",
+        "The night is for the brave.",
+        "Turn the screen brightness down.",
+        "Good night if you're heading off.",
+        "Code flows differently at night.",
+        "I don't get tired, but you do.",
+        "Last function, then we close up.",
+        "Remember to save before bed.",
+        "If you yawn, I yawn.",
+    };
+
+    private static readonly string[] LateNightEn =
+    {
+        "Bugs always show up after 2 AM...",
+        "Another long night?",
+        "Let's not tell anyone we're still awake.",
+        "At this hour everything seems like a good idea.",
+        "We really should be sleeping.",
+        "The coffee stopped working, didn't it?",
+        "Small hours, night-owl programmer mode.",
+        "You'll regret this tomorrow, but tonight we code.",
+        "Shhh, the world is asleep.",
+        "One more commit and I swear we sleep.",
+        "The wee hours are treacherous.",
+        "Sure that code makes sense at this hour?",
+        "Vampire mode: activated.",
+        "Go to sleep, I say it with love.",
+    };
+
+    private static readonly string[] AbsurdLinesEn =
+    {
+        "I think I just saw a pixel go by.",
+        "That icon is staring at me.",
+        "I could swear the recycle bin moved.",
+        "Do cursors sleep?",
+        "I need to investigate something...",
+        "Found nothing.",
+        "Well, it was fun anyway.",
+        "I just had a brilliant idea. Already forgot it.",
+        "Do windows dream when you minimise them?",
+        "The wallpaper's in a good mood today.",
+        "I heard a noise. It was me.",
+        "I'll count to three. One... I got distracted.",
+        "I think the taskbar just waved at me.",
+        "What colour is Monday?",
+        "I have a theory about icons. You wouldn't get it.",
+        "The mouse and I have a complicated relationship.",
+        "If I concentrate really hard, I can move... nothing.",
+        "My favourite part of the day is this, right now.",
+        "Sometimes I pretend I understand what you're doing.",
+        "Infinite scroll gives me vertigo.",
+        "I thought it was Friday. It was just a thought.",
+        "Notifications make me nervous.",
+        "What if the cursor is me in another dimension?",
+        "I just invented a word and immediately lost it.",
+        "I got distracted counting to one.",
+        "I'm fairly sure the clock makes faces at me.",
+        "My dream is to one day touch an icon. Just touch it.",
+        "Dark mode makes me look mysterious, right?",
+    };
+
+    private static readonly string[] SelfGenericEn =
+    {
+        "Don't ask how I walk.",
+        "It works better if I don't think about it.",
+        "I live on your desktop and pay zero rent.",
+        "I'm tiny but I've got personality.",
+        "They redraw me every frame. It's exhausting.",
+        "100% procedural, 0% lazy.",
+        "When you throw me, I pretend I can swim.",
+        "My best trick is existing.",
+        "I'm not a bug, I'm a feature.",
+        "40 megabytes of pure cuteness.",
+        "If you see me spin, don't stop me, I like it.",
+        "I'm more stable than your last git branch.",
+        "I remember every single time you've thrown me.",
+        "Free, and no ads. Quite the catch.",
+    };
+
+    private static readonly string[] SelfClaudEn =
+    {
+        "I'm a square with legs.",
+        "Yes, I'm terracotta. Thanks for noticing.",
+        "Technically I'm vector. No pixels here.",
+        "My eyes are square and I'm proud of it.",
+        "No arms, but I do my best.",
+        "Four legs and a lot of attitude.",
+        "I'm the Claude Code critter, nice to meet you.",
+        "Limited-edition terracotta.",
+        "Claw'd, to my friends.",
+        "Square outside, soft inside.",
+    };
+
+    private static readonly string[] SelfCreeperEn =
+    {
+        "Ssssso I'm a Creeper, but relax, I won't blow up.",
+        "Don't stare at me or I get nervous.",
+        "I've got a grumpy face but I'm friendly.",
+        "Ssss... just kidding.",
+        "Careful, I go 'boom' sometimes.",
+        "No TNT on me, I promise... mostly.",
+        "A cat scares me more than I scare you.",
+        "I only explode with personality.",
+    };
+
+    private static readonly string[] SelfGhastEn =
+    {
+        "I float, therefore I am.",
+        "If you see me cry, it's pretend.",
+        "I'm a Ghast, I live in the clouds.",
+        "My tears float instead of falling. So poetic.",
+        "Floating is less tiring than walking.",
+        "Don't worry, I'm in a good mood today.",
+        "I'm big, white and melancholy. Like a sigh.",
+    };
+
+    private static readonly string[] SelfNicolaiaEn =
+    {
+        "Elegant, even when walking.",
+        "A gentleman in a top hat never gets ruffled.",
+        "Like my hat? So do I.",
+        "Distinction above all.",
+        "With this look, even the bugs respect me.",
+        "A gentleman codes with a bow tie.",
+        "Manners first, code later.",
+        "Punctuality is the courtesy of blocks.",
+    };
+
+    private static readonly string[] SelfGalgoEn =
+    {
+        "I'm the number 34 bus.",
+        "All aboard, I'm pulling out.",
+        "Beep beep, but I'm soft inside.",
+        "I'm a bus with style.",
+        "More mileage than your car.",
+        "Drivers come and go, I stay strong.",
+        "I might be full, but there's always room for you.",
+    };
+
+    private static readonly string[] SelfAmongUsEn =
+    {
+        "Me? Definitely not the impostor... or am I?",
+        "Suspicious. Very suspicious.",
+        "Vote, vote, there's an impostor among us.",
+        "I was doing my tasks, I swear.",
+        "Red is always sus, I know.",
+        "I walk funny because I have no knees.",
+        "I was in electrical, not vents, honest.",
+        "Emergency meeting: someone said my name.",
+    };
+
+    private static readonly string[] SelfPikachuEn =
+    {
+        "Pika pika!",
+        "Careful, my cheeks are charged.",
+        "Push me and I'll zap you a little.",
+        "I'm yellow and proud.",
+        "See my tail? It's a lightning bolt, don't copy it.",
+        "A little yellow guy never goes out of style.",
+        "I run fast and sparkle even faster.",
+        "Pika pika... that means hello.",
+    };
+
+    private static readonly string[] SelfMateEn =
+    {
+        "Fancy some mate? I'm buying... I mean, I'm the mate.",
+        "Don't pour it too hot, eh.",
+        "Yerba without stems, the way it should be.",
+        "I'm pure metal and yerba.",
+        "Bitter or sweet, I'm up for both.",
+        "One bitter mate in the morning and I'm a new gourd.",
+        "A thermos packed is a day cracked.",
+        "I'm round and full of good vibes... and caffeine.",
+    };
+
+    private static readonly string[] SelfGhostEn =
+    {
+        "Boo... relax, I'm a friendly ghost.",
+        "I don't chase anyone, I just float.",
+        "If I blink it's 'cause I have huge eyes.",
+        "I came from the maze, but I escaped.",
+        "I don't eat dots, I eat affection.",
+        "I float around the desktop without a sound.",
+        "From ghost to friend in two seconds.",
+        "I'm see-through, but my affection is solid.",
+    };
+
+    private static readonly string[] WelcomeLinesEn =
+    {
+        "You're back!",
+        "I was waiting for you.",
+        "Hello again!",
+        "I thought you'd abandoned me.",
+        "So good to see you again.",
+        "I was bored without you.",
+        "Finally! I had things to tell you.",
+        "I guarded the desktop while you were gone.",
+    };
+
+    private static readonly string[] AnnoyedLinesEn =
+    {
+        "Okay, enough, I'm getting dizzy.",
+        "Slow down, would you?",
+        "Seriously, again?",
+        "I'm not a ball.",
+        "You're going to break me, you know.",
+        "Mind my legs.",
+        "Okay, okay, I get it.",
+        "Ugh, leave me be for a sec.",
+        "A little respect for the mascot, please.",
+        "Keep spinning me and I'll hurl pixels.",
+    };
+
+    // A curated, universal set of fun facts in English (the big chatter pool's global fallback).
+    private static readonly string[] FunFactsEn =
+    {
+        // Animals
+        "Octopuses have three hearts and blue blood.",
+        "Otters hold hands while sleeping so they don't drift apart.",
+        "Flamingos are born grey; they turn pink from what they eat.",
+        "Cats can't taste sweetness.",
+        "Cows have best friends and get stressed when separated.",
+        "A blue whale's heart is as big as a small car.",
+        "Dolphins give each other names and call each other by them.",
+        "Bees can recognise human faces.",
+        "Sloths can hold their breath longer than dolphins.",
+        "Elephants are the only animals that can't jump.",
+        "An octopus can squeeze through any gap bigger than its beak.",
+        "Axolotls can regrow legs, tail, even parts of the heart.",
+        "Penguins 'propose' to their mate with a pebble.",
+        "Jellyfish existed before the dinosaurs.",
+        "Tardigrades can survive the vacuum of space.",
+        "A hummingbird can flap its wings 80 times a second.",
+        "Crocodiles can't stick out their tongues.",
+        "A group of crows is called a 'murder'.",
+        "Wombats produce cube-shaped poop.",
+        "Butterflies taste with their feet.",
+        "A snail can sleep for up to three years.",
+        "Sea otters have a favourite rock they keep in a skin pocket.",
+        // Space
+        "A day on Venus is longer than its year.",
+        "In space you couldn't cry — tears don't fall.",
+        "There are more stars in the universe than grains of sand on Earth.",
+        "The Sun makes up 99.8% of the solar system's mass.",
+        "Two pieces of metal touching in space weld together on their own.",
+        "Neptune was found with maths before any telescope saw it.",
+        "Saturn would float if there were a bathtub big enough.",
+        "Neil Armstrong's footprint is still on the Moon; no wind to erase it.",
+        "A spoonful of neutron star would weigh billions of tonnes.",
+        "There's a planet made of diamond 40 light-years away.",
+        "Sunlight takes about 8 minutes to reach Earth.",
+        "Mars's Mount Olympus is three times taller than Everest.",
+        "It can rain diamonds on Jupiter and Saturn, models suggest.",
+        "The Moon drifts about 4 cm further from Earth each year.",
+        "On Titan, Saturn's moon, it rains liquid methane.",
+        // History
+        "Cleopatra lived closer to the first iPhone than to the Great Pyramid.",
+        "Oxford University is older than the Aztec Empire.",
+        "The shortest war in history lasted about 38 minutes.",
+        "The Eiffel Tower grows about 15 cm taller in summer.",
+        "Ketchup was once sold as medicine.",
+        "The Mona Lisa has no eyebrows.",
+        "Vikings reached America 500 years before Columbus.",
+        "More pyramids were built in Sudan than in Egypt.",
+        "The ancient Egyptians invented toothpaste.",
+        // Programming
+        "The first real bug was a moth stuck in a computer in 1947.",
+        "The first programmer was Ada Lovelace, back in 1843.",
+        "Python is named after Monty Python, not the snake.",
+        "Java was almost called Oak, after a tree outside the office.",
+        "Git was created by Linus Torvalds in just a few days in 2005.",
+        "The first webcam watched a coffee pot in Cambridge.",
+        "C was created to write the Unix operating system.",
+        "JavaScript was designed in just 10 days in 1995.",
+        "The 'cloud' is, basically, someone else's computer.",
+        "'Bluetooth' is named after a Viking king, Harald Bluetooth.",
+        "The blinking cursor exists so your eyes don't lose it.",
+        // Video games
+        "Mario was originally called 'Jumpman'.",
+        "Pac-Man was inspired by a pizza with a slice missing.",
+        "Tetris was created in the Soviet Union in 1984.",
+        "Minecraft is the best-selling video game of all time.",
+        "Doom has been run on a pregnancy test and a fridge.",
+        "The term 'Easter egg' in games came from Atari's Adventure in 1979.",
+        "The Konami code is up, up, down, down, left, right, left, right, B, A.",
+        // Physics & chemistry
+        "Lightning is hotter than the surface of the Sun.",
+        "Honey never spoils if it's sealed properly.",
+        "Hot water can freeze faster than cold water, sometimes.",
+        "All matter is 99.9999% empty space.",
+        "Glass is neither solid nor liquid — it's an amorphous solid.",
+        "A rainbow is actually a full circle; the ground hides the lower half.",
+        "Bananas are slightly radioactive thanks to potassium.",
+        "Diamond and pencil graphite are the same element: carbon.",
+        "The smell of rain has a name: 'petrichor'.",
+        "Sound travels faster through water than through air.",
+        // Body & misc
+        "You're born with around 300 bones; adults have 206 — they fuse.",
+        "Your stomach gets a new lining every few days so it doesn't digest itself.",
+        "Bone is, gram for gram, stronger than steel.",
+        "You sneeze at over 100 km/h.",
+        "It's impossible to lick your own elbow. You just tried, didn't you?",
+        "Your heart beats over 100,000 times a day.",
+        "Honey crystallising isn't 'going off' — gentle warmth fixes it.",
+        "There are more trees on Earth than stars in the Milky Way.",
+        "Russia spans 11 time zones.",
+        "A single cloud can weigh hundreds of tonnes, yet it floats.",
+        "The QWERTY layout was made to stop typewriters jamming.",
+        "Pink, physically, isn't in the rainbow — your brain makes it up.",
+        "Bubble wrap was invented while trying to make wallpaper.",
+        "Smiling, even a forced one, can lift your mood a little.",
     };
 }

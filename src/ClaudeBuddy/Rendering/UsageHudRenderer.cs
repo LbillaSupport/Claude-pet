@@ -95,6 +95,63 @@ public sealed class UsageHudRenderer
         canvas.Restore();
     }
 
+    private static readonly SKColor ComboOutline = new(0x33, 0x26, 0x0E);
+
+    /// <summary>
+    /// Draws the juggling combo counter ("x3") centred at <paramref name="center"/>, screen-
+    /// upright. <paramref name="fill"/> is the number colour (the engine tiers it by streak /
+    /// record); <paramref name="punch"/> (0..1) gives it a brief "pop" scale when it ticks up;
+    /// <paramref name="alpha"/> fades it out after the last catch. A chunky number with a dark
+    /// outline so it reads like a video-game combo over any wallpaper. The drawn glyphs are
+    /// anchored by their visual centre (not the baseline) so a tall number never clips.
+    /// </summary>
+    public void DrawComboCounter(SKCanvas canvas, SKPoint center, float dpi, int combo, SKColor fill, float alpha, float punch)
+    {
+        if (combo <= 0 || alpha <= 0.01f)
+        {
+            return;
+        }
+
+        byte a = (byte)(255 * MathUtil.Clamp01(alpha));
+        string label = $"x{combo}";
+        float size = (28f + (3.5f * combo)) * dpi;    // grows a little as the streak climbs
+        size = MathF.Min(size, 58f * dpi);
+        float scale = 1f + (0.35f * punch);           // pop on a fresh catch
+
+        _text.TextSize = size * scale;
+        _text.TextAlign = SKTextAlign.Center;
+
+        // Vertically centre on the glyph's actual bounds, so the top isn't clipped and it sits
+        // visually centred on `center.Y` regardless of font ascent/descent.
+        var bounds = new SKRect();
+        _text.MeasureText(label, ref bounds);
+        float baseline = center.Y - bounds.MidY;
+
+        // Dark outline: a stroked text pass behind the coloured fill (a temporary paint, since
+        // the shared _text paint is fill-only and we don't want to mutate its style).
+        using (var outline = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = size * 0.18f,
+            StrokeJoin = SKStrokeJoin.Round,
+            Color = ComboOutline.WithAlpha(a),
+            Typeface = _text.Typeface,
+            TextSize = _text.TextSize,
+            TextAlign = SKTextAlign.Center,
+        })
+        {
+            canvas.DrawText(label, center.X, baseline, outline);
+        }
+
+        _text.Color = fill.WithAlpha(a);
+        canvas.DrawText(label, center.X, baseline, _text);
+
+        // restore shared paint defaults for the bubble/other callers
+        _text.Color = BubbleInk;
+        _text.TextAlign = SKTextAlign.Left;
+    }
+
     /// <summary>
     /// Draws a speech bubble whose tail points down at <paramref name="tailTip"/> (canvas
     /// px). <paramref name="alpha"/> fades the whole thing in/out. Returns silently for

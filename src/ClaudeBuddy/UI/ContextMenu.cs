@@ -27,6 +27,9 @@ public sealed class MenuState
     public float BehaviorFrequency { get; init; } = 1f;
     public IReadOnlyList<SkinMenuItem> Skins { get; init; } = Array.Empty<SkinMenuItem>();
     public IReadOnlyList<AnimationMenuItem> Animations { get; init; } = Array.Empty<AnimationMenuItem>();
+
+    /// <summary>The user's language setting (may be <see cref="Core.Language.Auto"/>).</summary>
+    public Core.Language Language { get; init; } = Core.Language.Auto;
 }
 
 /// <summary>The user's choice, decoded back into something the engine can act on.</summary>
@@ -40,16 +43,33 @@ public readonly record struct MenuSelection(MenuCommand Command, string? SkinId 
 /// </summary>
 public sealed class ContextMenu
 {
+    private readonly ClaudeBuddy.Content.Strings _str;
+
+    public ContextMenu(ClaudeBuddy.Content.Strings str) => _str = str;
+
     // Command-id ranges keep dynamic sub-menu items distinct from the fixed commands.
     private const uint SkinBase = 1000;
     private const uint SpeedBase = 1100;
     private const uint VolumeBase = 1200;
     private const uint FreqBase = 1300;
+    private const uint LangBase = 1400; // "Language" items: LangBase + (int)Language
     private const uint AnimBase = 2000; // "Play Animation" items: AnimBase + index into MenuState.Animations
 
     private static readonly float[] SpeedPresets = { 0.5f, 0.75f, 1f, 1.5f, 2f };
     private static readonly float[] FreqPresets = { 0.5f, 1f, 1.5f, 2f };
-    private static readonly string[] FreqNames = { "Calm", "Normal", "Lively", "Hyper" };
+    private static readonly string[] FreqKeys = { "freq.calm", "freq.normal", "freq.lively", "freq.hyper" };
+
+    // The languages offered, in menu order (Auto first). Labels come from Strings/native names.
+    private static readonly (Core.Language Lang, string Key, string Native)[] Languages =
+    {
+        (Core.Language.Auto, "menu.language_auto", ""),
+        (Core.Language.English, "", "English"),
+        (Core.Language.Spanish, "", "Español"),
+        (Core.Language.Portuguese, "", "Português"),
+        (Core.Language.French, "", "Français"),
+        (Core.Language.German, "", "Deutsch"),
+        (Core.Language.Italian, "", "Italiano"),
+    };
 
     public MenuSelection Show(IntPtr hwnd, int x, int y, MenuState state)
     {
@@ -58,34 +78,35 @@ public sealed class ContextMenu
 
         try
         {
-            Add(menu, MenuCommand.OpenClaude, "Open Claude");
+            Add(menu, MenuCommand.OpenClaude, _str.T("menu.open_claude"));
             Separator(menu);
 
-            AppendSub(menu, "Change Skin", BuildSkinMenu(state, subMenus));
-            AppendSub(menu, "Animation Speed", BuildPresetMenu(SpeedBase, SpeedPresets, state.AnimationSpeed, v => $"{v:0.##}x", subMenus));
-            AppendSub(menu, "Behaviour Frequency", BuildFreqMenu(state, subMenus));
+            AppendSub(menu, _str.T("menu.change_skin"), BuildSkinMenu(state, subMenus));
+            AppendSub(menu, _str.T("menu.animation_speed"), BuildPresetMenu(SpeedBase, SpeedPresets, state.AnimationSpeed, v => $"{v:0.##}x", subMenus));
+            AppendSub(menu, _str.T("menu.behaviour_frequency"), BuildFreqMenu(state, subMenus));
+            AppendSub(menu, _str.T("menu.language"), BuildLanguageMenu(state, subMenus));
             // No Volume / Mute entries: the app is silent by design (no audio).
             Separator(menu);
 
             // Dev/showcase: force-play any single animation to review (and tweak) it.
-            AppendSub(menu, "Play Animation", BuildAnimationMenu(state, subMenus));
+            AppendSub(menu, _str.T("menu.play_animation"), BuildAnimationMenu(state, subMenus));
             Separator(menu);
 
-            Check(menu, MenuCommand.ToggleAlwaysOnTop, "Always On Top", state.AlwaysOnTop);
-            Check(menu, MenuCommand.ToggleLaunchOnStartup, "Launch On Startup", state.LaunchOnStartup);
-            Check(menu, MenuCommand.PhotoMode, "Photo Mode", state.PhotoMode);
-            Check(menu, MenuCommand.ToggleBattery, "Show Session Battery", state.ShowBattery);
-            Check(menu, MenuCommand.ToggleWorldData, "World Data (weather, etc.)", state.WorldData);
-            Add(menu, MenuCommand.ResetPosition, "Reset Position");
+            Check(menu, MenuCommand.ToggleAlwaysOnTop, _str.T("menu.always_on_top"), state.AlwaysOnTop);
+            Check(menu, MenuCommand.ToggleLaunchOnStartup, _str.T("menu.launch_on_startup"), state.LaunchOnStartup);
+            Check(menu, MenuCommand.PhotoMode, _str.T("menu.photo_mode"), state.PhotoMode);
+            Check(menu, MenuCommand.ToggleBattery, _str.T("menu.show_battery"), state.ShowBattery);
+            Check(menu, MenuCommand.ToggleWorldData, _str.T("menu.world_data"), state.WorldData);
+            Add(menu, MenuCommand.ResetPosition, _str.T("menu.reset_position"));
             Separator(menu);
 
-            Add(menu, MenuCommand.Achievements, "Achievements…");
-            Add(menu, MenuCommand.Mods, "Mods…");
-            Add(menu, MenuCommand.Settings, "Settings Folder…");
-            Add(menu, MenuCommand.About, "About Claude Buddy");
+            Add(menu, MenuCommand.Achievements, _str.T("menu.achievements"));
+            Add(menu, MenuCommand.Mods, _str.T("menu.mods"));
+            Add(menu, MenuCommand.Settings, _str.T("menu.settings_folder"));
+            Add(menu, MenuCommand.About, _str.T("menu.about"));
             Separator(menu);
 
-            Add(menu, MenuCommand.Exit, "Exit");
+            Add(menu, MenuCommand.Exit, _str.T("menu.exit"));
 
             // The documented dance so a tool/topmost window can host a tracking menu.
             NativeMethods.SetForegroundWindow(hwnd);
@@ -128,9 +149,17 @@ public sealed class ContextMenu
             return new MenuSelection(MenuCommand.AnimationSpeed, Value: SpeedPresets[(int)(id - SpeedBase)]);
         }
 
-        if (id is >= FreqBase and < FreqBase + 100)
+        if (id is >= FreqBase and < LangBase)
         {
             return new MenuSelection(MenuCommand.BehaviorFrequency, Value: FreqPresets[(int)(id - FreqBase)]);
+        }
+
+        if (id is >= LangBase and < AnimBase)
+        {
+            int li = (int)(id - LangBase);
+            return li >= 0 && li < Languages.Length
+                ? new MenuSelection(MenuCommand.SetLanguage, Value: (int)Languages[li].Lang)
+                : new MenuSelection(MenuCommand.None);
         }
 
         if (id >= AnimBase)
@@ -214,7 +243,7 @@ public sealed class ContextMenu
         return sub;
     }
 
-    private static IntPtr BuildFreqMenu(MenuState state, List<IntPtr> owned)
+    private IntPtr BuildFreqMenu(MenuState state, List<IntPtr> owned)
     {
         IntPtr sub = NativeMethods.CreatePopupMenu();
         owned.Add(sub);
@@ -222,7 +251,22 @@ public sealed class ContextMenu
         for (int i = 0; i < FreqPresets.Length; i++)
         {
             uint flags = NativeMethods.MF_STRING | (i == nearest ? NativeMethods.MF_CHECKED : 0);
-            NativeMethods.AppendMenu(sub, flags, (UIntPtr)(FreqBase + (uint)i), FreqNames[i]);
+            NativeMethods.AppendMenu(sub, flags, (UIntPtr)(FreqBase + (uint)i), _str.T(FreqKeys[i]));
+        }
+
+        return sub;
+    }
+
+    private IntPtr BuildLanguageMenu(MenuState state, List<IntPtr> owned)
+    {
+        IntPtr sub = NativeMethods.CreatePopupMenu();
+        owned.Add(sub);
+        for (int i = 0; i < Languages.Length; i++)
+        {
+            (Core.Language lang, string key, string native) = Languages[i];
+            string label = key.Length > 0 ? _str.T(key) : native; // "Auto (system)" localized; rest are native names
+            uint flags = NativeMethods.MF_STRING | (lang == state.Language ? NativeMethods.MF_CHECKED : 0);
+            NativeMethods.AppendMenu(sub, flags, (UIntPtr)(LangBase + (uint)i), label);
         }
 
         return sub;

@@ -107,6 +107,8 @@ internal static class Program
         // Shared infrastructure.
         services.AddSingleton<Rng>();
         services.AddSingleton<GameTime>();
+        services.AddSingleton<Localization>();
+        services.AddSingleton<Strings>();
         services.AddSingleton<Phrasebook>();
 
         // World / entity / simulation systems.
@@ -222,6 +224,24 @@ internal static class Program
                 hud.DrawBattery(surface.Canvas, new SkiaSharp.SKPoint(bx, by), 1f, 0.62f, charging: false, pulse: 0f);
                 hud.DrawBubble(surface.Canvas, new SkiaSharp.SKPoint(bx, by - 32f), 1f,
                     "¡Buenas tardes! ¡Feliz viernes! ¿Sabías que los pulpos tienen tres corazones?", 1f, visLeft, visRight);
+            }
+
+            // QA: `--render <skin> out.png <sz> combo` draws the juggling combo counter so its
+            // look (gold number + dark outline + pop) can be checked deterministically.
+            if (prop == "combo")
+            {
+                var hud = new UsageHudRenderer();
+                float headroom = skins.Current.Palette.HudHeadroom;
+                float cy = MathF.Max(34f, anchorY - ((headroom + 0.25f) * height));
+                hud.DrawComboCounter(surface.Canvas, new SkiaSharp.SKPoint(anchorX, cy), 1f, 5,
+                    new SkiaSharp.SKColor(0xF2, 0x8A, 0x2E), 1f, 0.6f);
+
+                // Also draw a multi-line bubble lifted above the number, mirroring the engine's
+                // stacking, so the "bubble overlapping the combo number" case can be verified.
+                float comboH = MathF.Min(58f, 28f + (3.5f * 5));
+                float by = cy - (comboH * 0.7f) - 8f;
+                hud.DrawBubble(surface.Canvas, new SkiaSharp.SKPoint(anchorX, by), 1f,
+                    "¡Mi récord de malabares es x5! ¿Lo superamos juntos?", 1f, 0f, size);
             }
 
             // QA: `--render <skin> out.png <sz> portal` draws a Portal-style portal beside the

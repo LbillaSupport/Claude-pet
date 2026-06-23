@@ -39,6 +39,13 @@ public sealed class AppSettings
     public bool LaunchOnStartup { get; set; }
 
     /// <summary>
+    /// UI + chatter language. <see cref="Core.Language.Auto"/> (default) detects it from the
+    /// OS UI language at startup; the right-click menu lets the user pin a specific one.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public Core.Language Language { get; set; } = Core.Language.Auto;
+
+    /// <summary>
     /// Ambient fake weather (drifting snow/leaves/petals around the mascot). Off by
     /// default so particles only ever appear from deliberate behaviours (petting, dancing,
     /// celebrating, …) rather than floating around all the time.
@@ -119,6 +126,10 @@ public sealed class Stats
 
     /// <summary>Highest point above the ground (in physical px) ever reached — the altitude record.</summary>
     public long MaxThrowHeightPx { get; set; }
+
+    /// <summary>Best "keep-up" combo: most consecutive mid-air catches without touching any
+    /// wall/floor/ceiling. The juggling mini-game's high score.</summary>
+    public long BestKeepUpCombo { get; set; }
 
     /// <summary>When Claw'd was last petted (for "hace mucho que no me mimás" lines).</summary>
     public DateTimeOffset LastPettedUtc { get; set; }

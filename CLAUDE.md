@@ -571,9 +571,28 @@ MoodIntensity, MinHappiness, EnterParticle, EnterSound }`.
 A push to make Claw'd surprise you for hours without adding "features". All procedural, all
 reusing the existing `BehaviorCatalog`/`Animator`/`Pose`/`Physics`.
 
+### Internationalization (i18n) — `Content/Localization.cs` + `Content/Strings.cs`
+The app auto-detects the OS language and can be switched from the right-click menu (**Language ▸**:
+Auto/English/Español/Português/Français/Deutsch/Italiano). `Core.Language` enum + `AppSettings.Language`
+(default `Auto`, persisted). `Localization` (DI singleton) resolves `Auto` → the OS UI culture via
+`FromCulture` (two-letter ISO → language, English fallback for anything unsupported) and holds
+`Current`; the engine calls `_loc.Set(S.Language)` at startup and on the menu change. **Two text
+systems read it:** (1) `Strings.T(key[, arg0])` — the FIXED UI strings (menu, combo cheers, abuse,
+clone, greetings) as a `key → one line per language` table, all 6 languages, with English→Spanish
+fallback per cell; (2) the `Phrasebook` — RANDOM chatter — whose `ByLang(english, spanish, …)`
+helper picks the pool for `Current`, with English as the shared global fallback (so pt/fr/de/it use
+the English chatter pools until dedicated ones are added). **Coverage today:** UI fully localized in
+6 languages; pet chatter has full ES + EN pools, others fall back to EN. Add a language: enum value +
+menu entry (`ContextMenu.Languages`) + a column in `Strings.L(...)` + optionally `*En`-style pools.
+Add a UI string: a `Strings.Table` entry + call `_str.T("key")`. **Gotcha:** still emoji-free in every
+language (Skia software raster). The menu itself is built localized in `ContextMenu` (it takes
+`Strings` via DI; `MenuState.Language` drives the checkmark + `MenuCommand.SetLanguage` carries the
+chosen `Language` as an int in `MenuSelection.Value`).
+
 - **`Content/Phrasebook.cs`** (new, DI singleton) owns Claw'd's *entire* spoken repertoire as
-  data: categorised Spanish pools (observations, time-of-day ×5, absurd, self-referential
-  generic + per-skin, welcome, annoyed) + a **400+ fun-fact** database grouped by topic
+  data: categorised Spanish pools + English pools (`*En`) selected by `ByLang` (observations,
+  time-of-day ×5, absurd, self-referential generic + per-skin, welcome, annoyed) + a **400+
+  fun-fact** database (ES) with a curated English set, grouped by topic
   (animals, space, history, programming, games, physics, chemistry, body, food, geography,
   art, OS/internet/AI, useless trivia…). All **emoji-free** (Skia software raster can't
   colour-render them); keep new lines plain ASCII-ish Spanish (acented chars OK via Segoe UI,
@@ -605,6 +624,17 @@ reusing the existing `BehaviorCatalog`/`Animator`/`Pose`/`Physics`.
   `GivePawMaxCursorSpeed`) for `GivePawHoldSeconds` and it offers a paw — reuses the `wave` pose
   (lifts an outer leg toward the cursor) + hearts, `GivePawCooldown` debounce; decays fast if
   the cursor moves away.
+- **"Keep-up" juggling mini-game**: throw/drop Claw'd and catch it in mid-air before it touches
+  ANY surface to build a combo; a touch resets it. Three hooks in `MascotEngine`: `ReleaseThrow`
+  arms a round (`_keepUpInFlight`) when released airborne above `KeepUpMinThrowSpeed`; the start
+  of a drag while airborne calls `RegisterKeepUpCatch` (combo++, gold pop, sparkles, record
+  check); `OnImpact` AND `OnLanded` call `EndKeepUpRound(touched:true)` (any wall/floor/ceiling
+  breaks it). The combo number floats highest of all (`UsageHudRenderer.DrawComboCounter` — a
+  chunky gold "xN" with a dark outline + a `_comboPunch` pop), drawn in `DrawUsageHud` from
+  `_comboShown` (which lingers/fades after a break while `_keepUpCombo` resets to 0). Best combo
+  persists in `Stats.BestKeepUpCombo` (survives updates) and the pet mentions/celebrates it
+  (`MemoryLine`, `RegisterKeepUpCatch` record bubble). Preview the counter art with
+  `--render <skin> out.png <sz> combo`.
 - **Imaginary props** (#5) ride a **single generic channel** rather than 20 Pose fields:
   `Pose.HeldProp` (a `Core.HeldPropKind` enum, set directly — not blended) + `Pose.HeldPropAmount`
   (faded). One `AnimationState.HoldProp` pose presents whatever prop the engine selected via

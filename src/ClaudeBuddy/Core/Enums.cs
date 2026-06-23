@@ -8,6 +8,23 @@ public enum Facing
 }
 
 /// <summary>
+/// The UI/chatter language. <see cref="Auto"/> picks one from the OS UI language at startup
+/// (falling back to English for anything we don't have). The rest force a specific language
+/// from the right-click menu. Add a language: add a value here, a menu entry, and a column in
+/// the <see cref="Content.Strings"/> tables.
+/// </summary>
+public enum Language
+{
+    Auto,
+    English,
+    Spanish,
+    Portuguese,
+    French,
+    German,
+    Italian,
+}
+
+/// <summary>
 /// The body/face archetype the artist draws. Most skins are just recolours of the
 /// classic block (<see cref="Claud"/>); a few change the silhouette — the Creeper's
 /// signature face, the Ghast's tentacles and sad eyes, or Nicolaia's top hat, suit and
@@ -251,6 +268,10 @@ public enum MenuCommand
     /// <summary>Force-play a specific animation/behaviour (the "Play Animation" submenu).
     /// The chosen behaviour id rides in <see cref="UI.MenuSelection.SkinId"/>.</summary>
     PlayAnimation,
+
+    /// <summary>Set the UI/chatter language (the chosen <see cref="Language"/> rides in
+    /// <see cref="UI.MenuSelection.Value"/> as the enum's int).</summary>
+    SetLanguage,
     Achievements,
     Mods,
     Settings,

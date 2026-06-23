@@ -55,6 +55,8 @@ public sealed class MascotEngine
     private readonly AchievementService _achievements;
     private readonly ContextMenu _menu;
     private readonly Phrasebook _phrasebook;
+    private readonly Localization _loc;
+    private readonly Strings _str;
     private readonly Rng _rng;
     private readonly GameTime _time;
 
@@ -91,6 +93,15 @@ public sealed class MascotEngine
     private float _ruffleCd;           // debounce for the close fast-flick "ruffle"
     private float _pawHover;           // seconds the cursor has rested still right beside it
     private float _pawCd;              // debounce so "give a paw" doesn't re-trigger constantly
+
+    // "Keep-up" juggling mini-game: throw Claw'd and catch it in mid-air before it touches any
+    // wall/floor/ceiling to build a combo; a touch resets it.
+    private int _keepUpCombo;          // current consecutive mid-air catches
+    private int _comboShown;           // the combo value the floating number displays (lingers on break)
+    private bool _keepUpInFlight;      // a valid juggling toss is airborne, untouched, awaiting a catch
+    private float _comboFlash;         // seconds the combo number stays visible (counts down)
+    private float _comboPunch;         // 0..1 "pop" scale impulse applied when the number ticks up
+    private bool _keepUpRecordPending; // a new best combo was just set (celebrate on the next catch)
 
     private bool _photoMode;
     private bool _claudeWasRunning;
@@ -174,7 +185,7 @@ public sealed class MascotEngine
         SkinManager skins, ModManager mods,
         IClaudeLauncher claude, IStartupService startup,
         IAudioService audio, AchievementService achievements, ContextMenu menu,
-        Phrasebook phrasebook, Rng rng, GameTime time)
+        Phrasebook phrasebook, Localization loc, Strings str, Rng rng, GameTime time)
     {
         _settings = settings;
         _world = world;
@@ -203,6 +214,8 @@ public sealed class MascotEngine
         _achievements = achievements;
         _menu = menu;
         _phrasebook = phrasebook;
+        _loc = loc;
+        _str = str;
         _rng = rng;
         _time = time;
         _cloneAnimator = new Animator(rng);
@@ -213,6 +226,9 @@ public sealed class MascotEngine
         _window = window;
         _renderer = renderer;
         _world.SetDpiScale(window.DpiScale);
+
+        // Resolve the language (Auto → OS culture) before anything draws or speaks.
+        _loc.Set(S.Language);
 
         // The portal clone gets its own passive, click-through overlay (same size as Claw'd's)
         // that follows it, so it can fall in and roam ANYWHERE on screen, not just inside
@@ -330,6 +346,7 @@ public sealed class MascotEngine
 
         // The "living drag" reactions (dizziness, helicopter, panic-fling, personality).
         UpdateDragReactions(dt);
+        UpdateKeepUp(dt); // the juggling mini-game's floating combo number
 
         // While grabbed OR clinging for a panic beat, physics still runs (the spring moves
         // the body) but the behaviour brain is parked. "Refuse to move" also parks the
@@ -498,8 +515,9 @@ public sealed class MascotEngine
         // Speech bubbles (battery comments AND world-data lines) show whenever either
         // feature is on — they must NOT depend on the battery being visible.
         bool bubbleActive = !string.IsNullOrEmpty(_bubble) && BubbleAlpha() > 0f;
+        bool comboActive = _comboFlash > 0f && _comboShown > 0;
 
-        if (!showBattery && !bubbleActive)
+        if (!showBattery && !bubbleActive && !comboActive)
         {
             return;
         }
@@ -536,10 +554,48 @@ public sealed class MascotEngine
             stackY -= (22f * dpi) + (10f * dpi); // lift the bubble clear above the battery
         }
 
+        // The juggling combo number floats just above the body. It is the LOWEST of the floating
+        // HUD pieces, so the speech bubble (drawn next) is lifted clear above it — otherwise a
+        // multi-line bubble overlaps the number and you can't read either.
+        float comboH = 0f;
+        if (comboActive)
+        {
+            float comboY = MathF.Max(34f * dpi, feet.Y - ((headroom + 0.25f) * height));
+            float comboAlpha = MathUtil.Clamp01(_comboFlash / 0.6f); // fade out in the last 0.6 s
+            _hud.DrawComboCounter(canvas2D, new SKPoint(anchorX, comboY), dpi, _comboShown, ComboColor(_comboShown), comboAlpha, _comboPunch);
+
+            // Reserve the number's own height (it grows with the streak) so the bubble clears it.
+            comboH = MathF.Min(58f, 28f + (3.5f * _comboShown)) * dpi;
+            stackY = MathF.Min(stackY, comboY - (comboH * 0.7f) - (8f * dpi));
+        }
+
         if (bubbleActive)
         {
             _hud.DrawBubble(canvas2D, new SKPoint(anchorX, stackY), dpi, _bubble, BubbleAlpha(), visLeft, visRight);
         }
+    }
+
+    /// <summary>
+    /// Colours the combo number by how big the streak is, with a special bright gold once it
+    /// reaches (or beats) the saved best — so beating your record visibly lights up.
+    /// </summary>
+    private SKColor ComboColor(int combo)
+    {
+        bool atRecord = combo >= (int)S.Stats.BestKeepUpCombo && combo >= 2;
+        if (atRecord)
+        {
+            return new SKColor(0xFF, 0xD4, 0x3A); // record: bright gold
+        }
+
+        return combo switch
+        {
+            <= 1 => new SKColor(0xEC, 0xF2, 0xF8), // 1: cool white
+            2 => new SKColor(0x6F, 0xD3, 0xF2),    // 2: cyan
+            3 => new SKColor(0x68, 0xD8, 0x6B),    // 3: green
+            4 => new SKColor(0xF2, 0xC4, 0x3A),    // 4: amber
+            5 => new SKColor(0xF2, 0x8A, 0x2E),    // 5: orange
+            _ => new SKColor(0xF2, 0x4F, 0x4F),    // 6+: hot red
+        };
     }
 
     // ===================================================================
@@ -614,14 +670,19 @@ public sealed class MascotEngine
         {
             _particles.EmitDust(new Vector2(_mascot.Position.X, _world.GroundY));
         }
+
+        // Start a "keep-up" juggling round: a real toss (fast enough, and not already resting
+        // on the ground) is now airborne and untouched — catch it before it hits anything.
+        _keepUpInFlight = releaseVelocity.Length > EngineConstants.KeepUpMinThrowSpeed && !_mascot.OnGround;
     }
 
     // ===================================================================
     //  "Living drag" — dizziness, helicopter, panic-fling, personality
     // ===================================================================
 
-    private static readonly string[] AbuseLines =
-        { "...", "¿Otra vez?", "¿En serio?", "Ya basta...", "Me mareo...", "Uff, basta", "Pará un poco" };
+    // Rough-handling reaction keys into the localized Strings table.
+    private static readonly string[] AbuseKeys =
+        { "abuse.0", "abuse.1", "abuse.2", "abuse.3", "abuse.4", "abuse.5", "abuse.6" };
 
     private void UpdateDragReactions(float dt)
     {
@@ -687,6 +748,9 @@ public sealed class MascotEngine
     private void OnImpact(ImpactEvent e)
     {
         float speed = e.Speed;
+
+        // Touching ANY surface (wall/floor/ceiling) ends a juggling round and breaks the combo.
+        EndKeepUpRound(touched: true);
 
         if (speed < EngineConstants.ImpactTinySpeed)
         {
@@ -789,12 +853,12 @@ public sealed class MascotEngine
         int line;
         do
         {
-            line = _rng.Range(0, AbuseLines.Length);
+            line = _rng.Range(0, AbuseKeys.Length);
         }
-        while (AbuseLines.Length > 1 && line == _lastPersonalityLine);
+        while (AbuseKeys.Length > 1 && line == _lastPersonalityLine);
         _lastPersonalityLine = line;
 
-        ShowBubble(AbuseLines[line], 2.6f);
+        ShowBubble(_str.T(AbuseKeys[line]), 2.6f);
         _emotion.Nudge(_rng.Chance(0.5f) ? Mood.Sad : Mood.Scared, 0.8f, 2f);
 
         // Sometimes it sulks: plants itself, crosses its little arms in a puchero and
@@ -870,6 +934,12 @@ public sealed class MascotEngine
         {
             _dragging = true;
             _mascot.BeingDragged = true;
+            // A clean mid-air catch during a juggling round scores a combo point.
+            if (_keepUpInFlight && !_mascot.OnGround)
+            {
+                RegisterKeepUpCatch();
+            }
+
             _mascot.Surface = Surface.Floor; // peeled off the wall when grabbed
             _mascot.RenderAngleOverride = null;
             _pendingClick = false;
@@ -1248,6 +1318,11 @@ public sealed class MascotEngine
             pool.Add("Mi récord de altura sigue en pie. Fue épico.");
         }
 
+        if (s.BestKeepUpCombo >= 3)
+        {
+            pool.Add($"Mi récord de malabares es x{s.BestKeepUpCombo}. ¿Lo superamos?");
+        }
+
         // "It's been a while since you petted me."
         if (s.LastPettedUtc > DateTimeOffset.MinValue)
         {
@@ -1442,6 +1517,7 @@ public sealed class MascotEngine
             BehaviorFrequency = S.BehaviorFrequency,
             Skins = skins,
             Animations = animations,
+            Language = S.Language,
         };
     }
 
@@ -1514,6 +1590,11 @@ public sealed class MascotEngine
                 break;
             case MenuCommand.PlayAnimation when sel.SkinId is not null:
                 PlayAnimationFromMenu(sel.SkinId);
+                break;
+            case MenuCommand.SetLanguage:
+                S.Language = (Language)(int)sel.Value;
+                _loc.Set(S.Language);
+                ShowBubble(_str.T("greet.afternoon"), 2.5f); // a quick line so the change is visible
                 break;
             case MenuCommand.Achievements:
                 ShowAchievements();
@@ -1675,6 +1756,9 @@ public sealed class MascotEngine
         {
             _particles.EmitDust(new Vector2(_mascot.Position.X, _world.GroundY), (int)(impact * 6) + 2);
         }
+
+        // A soft landing may not raise an ImpactEvent, so end any juggling round here too.
+        EndKeepUpRound(touched: true);
     }
 
     private void OnAchievementUnlocked(Achievement achievement)
@@ -1884,6 +1968,71 @@ public sealed class MascotEngine
         {
             _pawHover = MathF.Max(0f, _pawHover - (dt * 2f)); // decays quickly once it breaks
         }
+    }
+
+    // ---- "Keep-up" juggling mini-game -----------------------------------
+
+    // Combo cheer keys into the localized Strings table.
+    private static readonly string[] KeepUpMilestoneKeys =
+        { "combo.cheer.0", "combo.cheer.1", "combo.cheer.2", "combo.cheer.3", "combo.cheer.4" };
+
+    /// <summary>A clean mid-air catch: bump the combo, pop the number, and celebrate records.</summary>
+    private void RegisterKeepUpCatch()
+    {
+        _keepUpInFlight = false; // this round was caught; a fresh throw starts the next
+        _keepUpCombo++;
+        _comboShown = _keepUpCombo;
+        _comboFlash = EngineConstants.KeepUpComboHoldSeconds;
+        _comboPunch = 1f;
+        _emotion.Nudge(Mood.Excited, 0.6f, 1f);
+        _particles.EmitSparkles(HeadWorld(), 3 + Math.Min(6, _keepUpCombo));
+
+        // New personal best → a little fanfare + remember it.
+        if (_keepUpCombo > S.Stats.BestKeepUpCombo)
+        {
+            S.Stats.BestKeepUpCombo = _keepUpCombo;
+            if (_keepUpCombo >= 3 && !_keepUpRecordPending)
+            {
+                _keepUpRecordPending = true;
+                _particles.EmitConfetti(HeadWorld());
+                ShowBubble(_str.T("combo.record", _keepUpCombo), 2.4f);
+            }
+        }
+        else if (_keepUpCombo >= 3 && _keepUpCombo % 3 == 0)
+        {
+            // Every few catches, a little cheer (without stomping a record bubble).
+            ShowBubble(_str.T(KeepUpMilestoneKeys[_rng.Range(0, KeepUpMilestoneKeys.Length)]), 1.8f);
+        }
+    }
+
+    /// <summary>
+    /// Ends the current juggling round. If <paramref name="touched"/> a surface and a combo was
+    /// going, it breaks (a brief "aww" when it was a decent streak). The number lingers, fading.
+    /// </summary>
+    private void EndKeepUpRound(bool touched)
+    {
+        if (!_keepUpInFlight && _keepUpCombo == 0)
+        {
+            return; // nothing in progress
+        }
+
+        if (touched && _keepUpCombo >= 3)
+        {
+            ShowBubble(_str.T("combo.broke", _keepUpCombo), 1.8f);
+            _emotion.Nudge(Mood.Sad, 0.4f, 0.8f);
+        }
+
+        _keepUpInFlight = false;
+        _keepUpCombo = 0;
+        _keepUpRecordPending = false;
+        // Leave _comboFlash running so the last number fades out instead of vanishing.
+    }
+
+    /// <summary>Ticks down the floating combo number's visibility + its pop scale.</summary>
+    private void UpdateKeepUp(float dt)
+    {
+        _comboFlash = MathF.Max(0f, _comboFlash - dt);
+        _comboPunch = MathF.Max(0f, _comboPunch - (dt * 4f)); // pop decays quickly
     }
 
     // ---- Behaviour "stories" (sequenced chains) -------------------------
@@ -2343,7 +2492,7 @@ public sealed class MascotEngine
         if (nearby && _mascot.OnGround && !_dragging && !_photoMode)
         {
             Trigger("surprised");
-            ShowBubble(_rng.Chance(0.5f) ? "¿Y ese... soy yo?!" : "¡Se abrió un portal!", 4f);
+            ShowBubble(_str.T(_rng.Chance(0.5f) ? "clone.is_that_me" : "clone.a_portal"), 4f);
             _emotion.Nudge(Mood.Surprised, 1f, 2f);
         }
     }

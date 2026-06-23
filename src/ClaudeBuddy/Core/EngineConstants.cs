@@ -156,6 +156,16 @@ public static class EngineConstants
     /// <summary>Debounce (s) so the paw offer doesn't repeat back-to-back.</summary>
     public const float GivePawCooldown = 6f;
 
+    // ---- "Keep-up" juggling mini-game -----------------------------------
+
+    /// <summary>Min release speed (px/s) for letting go to start a juggling round. Low on
+    /// purpose: the game is "drop it and re-catch it before it lands", so even a gentle release
+    /// while it's up in the air counts — it just can't be a near-zero set-down on the floor.</summary>
+    public const float KeepUpMinThrowSpeed = 60f;
+
+    /// <summary>Seconds the combo number stays up after the last catch before fading.</summary>
+    public const float KeepUpComboHoldSeconds = 2.2f;
+
     // ---- Real-desktop reactions (active window + volume) -----------------
 
     /// <summary>Debounce (s) for the active-window-switch glance so app-flipping isn't spammy.</summary>
